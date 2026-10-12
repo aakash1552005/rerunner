@@ -1,4 +1,4 @@
-"""Cassette storage engine for streaming JSONL reading and writing."""
+"""Cassette storage engine for streaming plain and gzip-compressed JSONL reading and writing."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class CassetteError(Exception):
 
 
 class Cassette:
-    """Represents a recorded agent session cassette stored as append-only JSONL."""
+    """Represents a recorded agent session cassette stored as append-only JSONL (.jsonl) or gzip-compressed JSONL (.jsonl.gz)."""
 
     def __init__(self, path: Path | str, metadata: CassetteMetadata | None = None) -> None:
         self.path = Path(path)
@@ -28,7 +28,7 @@ class Cassette:
 
     @classmethod
     def load(cls, path: Path | str, verify_integrity: bool = True) -> Cassette:
-        """Load an existing cassette from disk and optionally verify its cryptographic chain."""
+        """Load an existing plain or gzip-compressed cassette from disk and optionally verify its cryptographic chain."""
         file_path = Path(path)
         if not file_path.exists():
             raise FileNotFoundError(f"Cassette file not found: {file_path}")
@@ -82,7 +82,7 @@ class Cassette:
         self._last_hash = entry.entry_hash
 
     def save(self) -> None:
-        """Write the complete cassette to disk atomically."""
+        """Write the complete cassette to disk atomically, using gzip compression for .gz paths."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
 
