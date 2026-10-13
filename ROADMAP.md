@@ -18,9 +18,9 @@ Our objective is to become the de-facto standard deterministic test runner and f
 - [ ] First-class LangChain & LangGraph callback hooks
 - [ ] LlamaIndex instrumentation hook
 - [ ] CrewAI and AutoGen agent runner integrations
-- [ ] Gzip-compressed cassette archives for large-scale traces
+- [x] Gzip-compressed cassette archives for large-scale traces (`.jsonl.gz`) *(Shipped in v0.1.1)*
 
 ## v0.3.0 — Enterprise Governance
 - [ ] Automatic secret & PII redaction pipeline before disk persistence
 - [ ] Asymmetric Ed25519 cassette digital signatures for enterprise audit compliance
-- [ ] Remote cassette caching (GitHub Actions Cache integration)
+- [x] Remote cassette caching recipe with GitHub Actions (`actions/cache@v4`) *(Shipped in v0.1.1)*
