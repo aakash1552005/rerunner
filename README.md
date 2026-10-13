@@ -4,15 +4,18 @@
 
 **Deterministic flight recorder, replay engine, and CI test runner for AI agents.**
 
-[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)]()
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
+[![Release](https://img.shields.io/badge/release-v0.1.2-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![RFCs](https://img.shields.io/badge/architecture-Enterprise%20RFCs-purple.svg)](rfcs/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy%20strict-blue.svg)](https://mypy-lang.org/)
 
 *Record your AI agent once. Replay forever in CI in 0ms with $0 API tokens.*
 
 </div>
+
 
 ---
 
@@ -258,13 +261,18 @@ rerunner diff session_v1.jsonl session_v2.jsonl
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Enterprise Architecture
 
-Contributions from the community and frontier AI research teams are warmly welcomed.
-Please review [CONTRIBUTING.md](CONTRIBUTING.md) to set up your development environment.
+Contributions from the open-source community and frontier AI research teams are warmly welcomed:
+
+* 🗺️ **Strategic Vision**: Review our [ROADMAP.md](ROADMAP.md) for planned milestones.
+* 🏛️ **Enterprise RFCs**: Propose or review major architectural designs in our [RFC Directory](rfcs/) or open an [RFC Issue](https://github.com/aakash1552005/rerunner/issues/new?template=rfc.yml).
+* 🏷️ **Good First Issues**: Grab starter tasks on [GitHub Issues](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+* 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and linting rules.
 
 ---
 
 ## 📜 License
 
 Rerunner is licensed under the [Apache 2.0 License](LICENSE).
+
