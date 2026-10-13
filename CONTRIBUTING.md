@@ -18,8 +18,9 @@ We recommend using [uv](https://github.com/astral-sh/uv) or a standard Python vi
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/rerunner.git
+git clone https://github.com/aakash1552005/rerunner.git
 cd rerunner
+
 
 # 2. Create and activate a virtual environment
 python -m venv .venv
@@ -103,7 +104,8 @@ For major architectural proposals, new protocols, or significant API additions, 
 ## How to Get Involved
 
 Check out issues on GitHub:
-- [`good first issue`](https://github.com/your-org/rerunner/labels/good%20first%20issue): Well-scoped, bite-sized tasks with code pointers.
-- [`help wanted`](https://github.com/your-org/rerunner/labels/help%20wanted): High-priority ecosystem integrations and enterprise features.
-- [`rfc`](https://github.com/your-org/rerunner/labels/rfc): Architectural proposals actively seeking feedback.
+- [`good first issue`](https://github.com/aakash1552005/rerunner/labels/good%20first%20issue): Well-scoped, bite-sized tasks with code pointers.
+- [`help wanted`](https://github.com/aakash1552005/rerunner/labels/help%20wanted): High-priority ecosystem integrations and enterprise features.
+- [`rfc`](https://github.com/aakash1552005/rerunner/labels/rfc): Architectural proposals actively seeking feedback.
+
 

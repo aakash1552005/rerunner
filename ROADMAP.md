@@ -67,5 +67,6 @@ Our mission is to establish **Rerunner** as the industry-standard deterministic 
 
 We actively invite engineering teams and research labs to contribute to the roadmap:
 1. For architectural proposals, open an [RFC (Request for Comments)](.github/ISSUE_TEMPLATE/rfc.yml).
-2. For manageable enhancements, check issues tagged [`good first issue`](https://github.com/your-org/rerunner/labels/good%20first%20issue).
+2. For manageable enhancements, check issues tagged [`good first issue`](https://github.com/aakash1552005/rerunner/labels/good%20first%20issue).
+
 3. Review our [Contributing Guide](CONTRIBUTING.md) for code standards and setup instructions.
