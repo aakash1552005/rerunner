@@ -21,7 +21,7 @@ console = Console()
 
 @app.command()
 def inspect(
-    cassette_path: Path = typer.Argument(..., help="Path to the .jsonl cassette file"),
+    cassette_path: Path = typer.Argument(..., help="Path to a .jsonl or .jsonl.gz cassette file"),
 ) -> None:
     """Inspect and summarize the contents of a recorded cassette."""
     try:
@@ -143,7 +143,9 @@ def stats(
     # Average live LLM network call takes ~1.8 seconds vs 0.001s replay
     time_saved_seconds = http_steps * 1.8
 
-    stats_table = Table(title="CI Replay Efficiency & Savings", show_header=True, header_style="bold green")
+    stats_table = Table(
+        title="CI Replay Efficiency & Savings", show_header=True, header_style="bold green"
+    )
     stats_table.add_column("Metric", style="cyan")
     stats_table.add_column("Value", style="bold yellow")
 
@@ -168,7 +170,12 @@ def play(
         console.print(f"[bold red]Error loading cassette:[/] {exc}")
         sys.exit(1)
 
-    console.print(Panel(f"[bold green]Replaying {len(cassette.entries)} recorded agent steps...[/]", title="📼 Flight Playback"))
+    console.print(
+        Panel(
+            f"[bold green]Replaying {len(cassette.entries)} recorded agent steps...[/]",
+            title="📼 Flight Playback",
+        )
+    )
 
     for entry in cassette.entries:
         if entry.entry_type == "http" and entry.request and entry.response:
@@ -194,4 +201,3 @@ def play(
 
 if __name__ == "__main__":
     app()
-

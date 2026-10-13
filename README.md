@@ -107,6 +107,27 @@ with fork("session.jsonl", step=3) as session:
     # Step 4 executed live against model
 ```
 
+### Compressed Cassettes
+
+For long-running agent workflows, use the `.jsonl.gz` extension to store cassettes
+in gzip-compressed form:
+
+```python
+from rerunner import CassetteTransport
+
+transport = CassetteTransport("session.jsonl.gz", mode="record")
+```
+
+Rerunner automatically compresses `.jsonl.gz` cassettes when recording and
+decompresses them when replaying. The same CLI commands and SHA-256 integrity
+verification work with both `.jsonl` and `.jsonl.gz` files:
+
+```bash
+rerunner inspect session.jsonl.gz
+rerunner verify session.jsonl.gz
+rerunner play session.jsonl.gz
+```
+
 ---
 
 ## 🛡️ Guarding Destructive Side-Effects
