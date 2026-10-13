@@ -199,5 +199,46 @@ def play(
             )
 
 
+@app.command(name="export-otel")
+def export_otel(
+    cassette_path: Path = typer.Argument(..., help="Path to the .jsonl cassette file"),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Destination path for the OpenTelemetry JSON file. Defaults to stdout or <cassette>.otel.json",
+    ),
+    service_name: str = typer.Option(
+        "rerunner-agent",
+        "--service-name",
+        "-s",
+        help="Service name to attribute in OpenTelemetry resource attributes",
+    ),
+) -> None:
+    """Export a recorded cassette into an OpenTelemetry (OTel) OTLP-compliant trace file."""
+    import json
+    from rerunner.otel import export_cassette_to_otel_file, export_to_otlp
+
+    try:
+        cassette = Cassette.load(cassette_path, verify_integrity=False)
+        target = output_path or cassette_path.with_suffix(".otel.json")
+        export_cassette_to_otel_file(cassette_path, target, service_name=service_name)
+        console.print(
+            Panel(
+                f"[bold green]✔ Successfully exported cassette to OpenTelemetry trace format![/]\n"
+                f"[bold cyan]Source:[/] {cassette_path}\n"
+                f"[bold cyan]Destination:[/] {target}\n"
+                f"[bold cyan]Service Name:[/] {service_name}\n"
+                f"[dim]Compatible with Datadog, Jaeger, Grafana Tempo, and Dynatrace.[/]",
+                title="🔭 OpenTelemetry Export",
+                border_style="green",
+            )
+        )
+    except Exception as exc:
+        console.print(f"[bold red]Error exporting to OpenTelemetry:[/] {exc}")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     app()
+

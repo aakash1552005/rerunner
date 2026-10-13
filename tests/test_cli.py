@@ -26,3 +26,11 @@ def test_cli_inspect_and_verify(temp_cassette_path: Path) -> None:
     result_verify = runner.invoke(app, ["verify", str(temp_cassette_path)])
     assert result_verify.exit_code == 0
     assert "Cassette integrity verified successfully" in result_verify.output
+
+    # 4. Test export-otel command
+    out_otel = temp_cassette_path.with_suffix(".otel.json")
+    result_otel = runner.invoke(app, ["export-otel", str(temp_cassette_path), "--output", str(out_otel)])
+    assert result_otel.exit_code == 0
+    assert "Successfully exported cassette to OpenTelemetry" in result_otel.output
+    assert out_otel.exists()
+

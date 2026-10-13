@@ -76,9 +76,34 @@ pytest
 
 ---
 
+## Contribution Tracks
+
+We have organized high-impact work into distinct tracks so contributors can align with their domain expertise:
+
+| Track | Focus Areas | Example PRs |
+| :--- | :--- | :--- |
+| **Frontier AI Ecosystem** | Agent framework adapters, SDK transports | Google GenAI, AutoGen, CrewAI, LlamaIndex |
+| **Enterprise Governance** | Security, compliance, auditing | Presidio PII redaction, Ed25519 signing, secret scrubbers |
+| **Observability & MLOps** | Traces, metrics, cloud exporters | OpenTelemetry (OTel), Datadog, Prometheus |
+| **Cloud Infrastructure** | Remote cassette caching, storage drivers | AWS S3, Google Cloud Storage, Azure Blob |
+| **Developer Experience** | Pytest fixtures, CLI tooling, visualizers | GitHub Actions, diff enhancements, Rich UI |
+
+---
+
+## Proposing Architecture Changes (RFCs)
+
+For major architectural proposals, new protocols, or significant API additions, please submit an **[RFC (Request for Comments)](.github/ISSUE_TEMPLATE/rfc.yml)** first.
+
+1. **Open an RFC issue**: Use our RFC issue template to outline motivation, enterprise impact, and technical specification.
+2. **Community Discussion**: Gather input from maintainers and industry peers.
+3. **Implementation**: Once aligned, submit PRs referencing the RFC issue number.
+
+---
+
 ## How to Get Involved
 
-Check out issues labeled:
-- `good first issue`: Ideal for new contributors.
-- `help wanted`: Important features or performance enhancements seeking community collaboration.
-- `rfc`: Architectural proposals open for design feedback.
+Check out issues on GitHub:
+- [`good first issue`](https://github.com/your-org/rerunner/labels/good%20first%20issue): Well-scoped, bite-sized tasks with code pointers.
+- [`help wanted`](https://github.com/your-org/rerunner/labels/help%20wanted): High-priority ecosystem integrations and enterprise features.
+- [`rfc`](https://github.com/your-org/rerunner/labels/rfc): Architectural proposals actively seeking feedback.
+

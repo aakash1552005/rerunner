@@ -26,8 +26,32 @@ def test_wrap_openai(temp_cassette_path: Path) -> None:
     assert hasattr(wrapped._client, "_transport")
 
 
+def test_wrap_google_genai(temp_cassette_path: Path) -> None:
+    from rerunner.integrations.google import wrap_gemini, wrap_google_genai, wrap_vertexai
+
+    # Test with standard _client attribute
+    client = DummyClient()
+    wrapped = wrap_google_genai(client, temp_cassette_path, mode="record")
+    assert hasattr(wrapped._client, "_transport")
+
+    # Test with custom client having http_client attribute
+    class CustomGenAIClient:
+        def __init__(self) -> None:
+            self.http_client = httpx.Client()
+
+    custom_client = CustomGenAIClient()
+    wrapped_custom = wrap_vertexai(custom_client, temp_cassette_path, mode="replay")
+    assert hasattr(wrapped_custom.http_client, "_transport")
+
+    # Test alias wrap_gemini
+    client_gemini = DummyClient()
+    wrapped_gemini = wrap_gemini(client_gemini, temp_cassette_path, mode="replay")
+    assert hasattr(wrapped_gemini._client, "_transport")
+
+
 def test_langchain_callback_handler(temp_cassette_path: Path) -> None:
     handler = RerunnerCallbackHandler(str(temp_cassette_path), mode="record")
     handler.on_llm_start({}, ["Write code"])
     handler.on_tool_start({}, "Search web")
     assert handler.step_count == 2
+

@@ -181,13 +181,17 @@ Wrap your existing SDK instances with zero configuration:
 ```python
 import anthropic
 import openai
-from rerunner.integrations import wrap_anthropic, wrap_openai
+from google import genai
+from rerunner.integrations import wrap_anthropic, wrap_google_genai, wrap_openai
 
-# Wrap Anthropic client
+# Wrap Anthropic Claude client
 client_claude = wrap_anthropic(anthropic.Anthropic(), "agent_run.jsonl", mode="replay")
 
 # Wrap OpenAI client
 client_openai = wrap_openai(openai.OpenAI(), "agent_run.jsonl", mode="replay")
+
+# Wrap Google GenAI / Vertex AI Gemini client
+client_gemini = wrap_google_genai(genai.Client(), "agent_run.jsonl", mode="replay")
 ```
 
 ### LangChain & LangGraph Integration
@@ -200,11 +204,30 @@ agent_executor.invoke({"input": "Fetch stock price"}, config={"callbacks": [hand
 
 ---
 
+## 🔭 OpenTelemetry (OTel) Distributed Traces
+
+Bridge testing and enterprise observability. Export cassettes to standardized OpenTelemetry trace JSON compatible with **Datadog, Jaeger, Grafana Tempo, and Dynatrace**:
+
+```bash
+# Export cassette to OpenTelemetry trace
+rerunner export-otel session.jsonl --output trace.otel.json --service-name "fraud-agent"
+```
+
+Or programmatically in Python:
+```python
+from rerunner import export_cassette_to_otel_file
+
+export_cassette_to_otel_file("session.jsonl", "trace.otel.json", service_name="fraud-agent")
+```
+
+---
+
 ## 🔒 Enterprise Secret & PII Sanitization
 
 Never accidentally commit API keys or auth tokens to GitHub. Rerunner automatically scrubs:
 * Anthropic API keys (`sk-ant-...`) $\rightarrow$ `[REDACTED_ANTHROPIC_KEY]`
 * OpenAI API keys (`sk-proj-...`, `sk-...`) $\rightarrow$ `[REDACTED_OPENAI_KEY]`
+* Google AI Studio / Gemini keys $\rightarrow$ `[REDACTED_API_KEY]`
 * Authorization headers (`Bearer ...`) $\rightarrow$ `Bearer [REDACTED_TOKEN]`
 * AWS access keys (`AKIA...`) $\rightarrow$ `[REDACTED_AWS_KEY_ID]`
 
@@ -222,12 +245,16 @@ rerunner play session.jsonl
 # Inspect cassette details and step sequences
 rerunner inspect session.jsonl
 
+# Export cassette into OpenTelemetry OTLP trace format
+rerunner export-otel session.jsonl -o session.otel.json
+
 # Cryptographically verify tamper-evident hash chain
 rerunner verify session.jsonl
 
 # Compare prompt and response divergences between two cassettes
 rerunner diff session_v1.jsonl session_v2.jsonl
 ```
+
 
 ---
 

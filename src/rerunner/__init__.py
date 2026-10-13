@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette, CassetteError
+from rerunner.otel import export_cassette_to_otel_file, export_to_otlp
 from rerunner.sanitizer import sanitize_headers, sanitize_payload, sanitize_string
 from rerunner.session import fork, record, replay
 from rerunner.side_effects import side_effect
@@ -16,6 +17,8 @@ __all__ = [
     "Cassette",
     "CassetteError",
     "CassetteTransport",
+    "export_cassette_to_otel_file",
+    "export_to_otlp",
     "fork",
     "record",
     "replay",
@@ -24,4 +27,5 @@ __all__ = [
     "sanitize_string",
     "side_effect",
 ]
+
 

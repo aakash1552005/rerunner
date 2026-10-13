@@ -1,0 +1,55 @@
+name: "🚀 RFC (Request for Comments)"
+description: "Propose a significant architectural change, new enterprise standard, or major subsystem."
+title: "[RFC]: "
+labels: ["rfc", "architecture", "needs-discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for proposing an RFC to **Rerunner**! RFCs are reserved for major architectural decisions,
+        new SDK integrations (e.g. Vertex AI, Azure OpenAI, AutoGen), remote cloud backends, security extensions,
+        or protocol modifications.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A concise 1-2 paragraph executive summary of the proposal.
+      placeholder: "Briefly explain the feature or architectural shift and what it achieves..."
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation & Enterprise Impact
+      description: Why is this needed? Which AI agent workflows or enterprise teams (e.g. AWS, Microsoft, Google, Anthropic, Databricks) benefit from this?
+      placeholder: "Today, enterprise teams using ... struggle with ... because ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Detailed Technical Specification
+      description: Explain the API design, data models, interaction diagrams, or code structure.
+      placeholder: |
+        ### Proposed API:
+        ```python
+        # Example API usage
+        ```
+        ### Internal Architecture:
+        - Component A
+        - Component B
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you evaluate and why were they rejected?
+  - type: checkboxes
+    id: contributor_commitment
+    attributes:
+      label: Implementation Plan & Collaboration
+      description: Are you or your organization interested in helping implement this RFC?
+      options:
+        - label: I / My team would like to implement or co-implement this feature once the RFC is approved.
+          required: false
