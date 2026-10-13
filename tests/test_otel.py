@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from rerunner.cassette import Cassette
-from rerunner.models import CassetteEntry, RequestModel, ResponseModel
+from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
 from rerunner.otel import export_cassette_to_otel_file, export_to_otlp
 
 
@@ -15,13 +15,13 @@ def test_export_to_otlp(temp_cassette_path: Path) -> None:
     entry_http = CassetteEntry(
         step=1,
         entry_type="http",
-        request=RequestModel(
+        request=RecordedRequest(
             method="POST",
             url="https://api.openai.com/v1/chat/completions",
             headers={"content-type": "application/json"},
             body='{"model": "gpt-4o", "messages": []}',
         ),
-        response=ResponseModel(
+        response=RecordedResponse(
             status_code=200,
             headers={"content-type": "application/json"},
             body='{"id": "chatcmpl-123"}',
@@ -82,19 +82,20 @@ def test_export_cassette_to_otel_file(temp_cassette_path: Path, tmp_path: Path) 
         CassetteEntry(
             step=1,
             entry_type="http",
-            request=RequestModel(
+            request=RecordedRequest(
                 method="POST",
                 url="https://api.anthropic.com/v1/messages",
                 headers={},
                 body="{}",
             ),
-            response=ResponseModel(
+            response=RecordedResponse(
                 status_code=200,
                 headers={},
                 body="{}",
             ),
         )
     )
+    cassette.save()
 
     out_file = tmp_path / "trace.otel.json"
     export_cassette_to_otel_file(temp_cassette_path, out_file, service_name="claude-agent")

@@ -216,13 +216,12 @@ def export_otel(
     ),
 ) -> None:
     """Export a recorded cassette into an OpenTelemetry (OTel) OTLP-compliant trace file."""
-    import json
-    from rerunner.otel import export_cassette_to_otel_file, export_to_otlp
+    from rerunner.otel import export_cassette_to_otel_file
 
     try:
-        cassette = Cassette.load(cassette_path, verify_integrity=False)
         target = output_path or cassette_path.with_suffix(".otel.json")
         export_cassette_to_otel_file(cassette_path, target, service_name=service_name)
+
         console.print(
             Panel(
                 f"[bold green]✔ Successfully exported cassette to OpenTelemetry trace format![/]\n"

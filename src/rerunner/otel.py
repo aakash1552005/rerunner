@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from rerunner.cassette import Cassette
 
 
@@ -39,27 +38,27 @@ def export_to_otlp(
     """
     from rerunner import __version__
 
+    agent_id = cassette.metadata.agent_id or "default-agent"
+    base_time_ns = int(cassette.metadata.created_at * 1_000_000_000)
+
     # 32-character hex string for OpenTelemetry traceId
     if not trace_id:
-        seed = f"{cassette.metadata.session_id}:{cassette.metadata.recorded_at.isoformat()}"
+        seed = f"{agent_id}:{cassette.metadata.created_at}:{cassette.path.name}"
         trace_id = _generate_deterministic_id(seed, 32)
     else:
         trace_id = trace_id.lower().replace("-", "")[:32].zfill(32)
 
     root_span_id = _generate_deterministic_id(f"{trace_id}:root", 16)
 
-    # Base timestamp in nanoseconds
-    base_time_ns = int(cassette.metadata.recorded_at.timestamp() * 1_000_000_000)
-
     spans: list[dict[str, Any]] = []
 
     # 1. Root span representing the entire agent session
-    session_duration_ns = max(len(cassette.entries) * 200_000_000, 500_000_000)  # estimate
+    session_duration_ns = max(len(cassette.entries) * 200_000_000, 500_000_000)
     root_span = {
         "traceId": trace_id,
         "spanId": root_span_id,
         "parentSpanId": "",
-        "name": f"agent.session:{cassette.metadata.session_id}",
+        "name": f"agent.session:{agent_id}",
         "kind": 1,  # SPAN_KIND_INTERNAL
         "startTimeUnixNano": str(base_time_ns),
         "endTimeUnixNano": str(base_time_ns + session_duration_ns),
@@ -151,7 +150,6 @@ def export_cassette_to_otel_file(
     service_name: str = "rerunner-agent",
 ) -> None:
     """Load a cassette and export its contents to an OpenTelemetry JSON file."""
-    from pathlib import Path
     from rerunner.cassette import Cassette
 
     cassette = Cassette.load(Path(cassette_path), verify_integrity=False)
