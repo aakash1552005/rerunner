@@ -131,6 +131,57 @@ rerunner verify session.jsonl.gz
 rerunner play session.jsonl.gz
 ```
 
+### Streaming Replay
+
+Rerunner records responses with a `text/event-stream` content type as individual
+chunks. During replay, those chunks are yielded through HTTPX's streaming
+interface without making another network request.
+
+```python
+import httpx
+import openai
+
+from rerunner import CassetteTransport
+
+transport = CassetteTransport(
+    "agent_run.jsonl",
+    mode="replay",
+)
+
+client = openai.OpenAI(
+    api_key="not-used-during-replay",
+    http_client=httpx.Client(transport=transport),
+)
+
+stream = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Summarize this report."}],
+    stream=True,
+)
+
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+`AsyncCassetteTransport` provides the equivalent asynchronous streaming
+interface for consumers using `async for`.
+
+To simulate the timing of a live stream in UI tests, configure a delay between
+replayed chunks:
+
+```python
+transport = CassetteTransport(
+    "agent_run.jsonl",
+    mode="replay",
+    chunk_delay_ms=25,
+)
+```
+
+The first chunk is returned immediately. Each subsequent chunk is delayed by
+the configured number of milliseconds. The default value is `0`, which adds no
+intentional delay. Buffered responses continue to use the existing replay
+behavior.
+
 ---
 
 ## 🛡️ Guarding Destructive Side-Effects
