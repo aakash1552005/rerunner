@@ -148,6 +148,9 @@ pytest
 pytest --rerunner-record
 ```
 
+For a reusable GitHub Actions workflow that restores recorded cassettes before
+replay tests, see the [GitHub Actions cassette caching recipe](docs/recipes/github_actions_caching.md).
+
 ---
 
 ## ⚡ 1-Line Client Wrappers
