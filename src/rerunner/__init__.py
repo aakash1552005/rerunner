@@ -10,9 +10,10 @@ from rerunner.session import fork, record, replay
 from rerunner.side_effects import side_effect
 from rerunner.transport import CassetteTransport
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
+
     "AsyncCassetteTransport",
     "Cassette",
     "CassetteError",
