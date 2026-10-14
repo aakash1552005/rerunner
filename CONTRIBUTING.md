@@ -114,6 +114,7 @@ Check out issues on GitHub:
 
 Every contribution matters. Contributors are recognized in:
 - The [GitHub Release Notes](https://github.com/aakash1552005/rerunner/releases) for each version.
+- The community [AUTHORS.md](AUTHORS.md) Contributor Hall of Fame.
 - The project documentation and changelogs.
 - High-impact contributors are invited to join the project core triage team.
 
