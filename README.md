@@ -320,6 +320,7 @@ Contributions from the open-source community and frontier AI research teams are 
 * 🏛️ **Enterprise RFCs**: Propose or review major architectural designs in our [RFC Directory](rfcs/) or open an [RFC Issue](https://github.com/aakash1552005/rerunner/issues/new?template=rfc.yml).
 * 🏷️ **Good First Issues**: Grab starter tasks on [GitHub Issues](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 * 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and linting rules.
+* 🌟 **Community**: Special thanks to our open-source contributors for making Rerunner faster, safer, and extensible.
 
 ---
 
