@@ -1,7 +1,8 @@
-"""OpenTelemetry (OTel) trace exporter for Rerunner cassettes.
+"""OpenTelemetry (OTel) trace and metrics exporter for Rerunner cassettes.
 
 Allows exporting recorded agent execution steps into standardized OpenTelemetry
-OTLP-compliant trace structures for Datadog, Jaeger, Grafana Tempo, and Dynatrace.
+OTLP-compliant trace structures and metrics for Datadog, Jaeger, Grafana Tempo, Dynatrace,
+and Prometheus.
 """
 
 from __future__ import annotations
@@ -144,15 +145,54 @@ def export_to_otlp(
     }
 
 
+def compute_cassette_metrics(cassette: Cassette) -> dict[str, Any]:
+    """Compute OpenTelemetry-compliant metrics summary from cassette entries."""
+    http_count = 0
+    side_effect_count = 0
+    status_distribution: dict[int, int] = {}
+    provider_distribution: dict[str, int] = {}
+
+    for entry in cassette.entries:
+        if entry.entry_type == "http":
+            http_count += 1
+            if entry.response:
+                status = entry.response.status_code
+                status_distribution[status] = status_distribution.get(status, 0) + 1
+            if entry.request:
+                url = entry.request.url
+                if "anthropic" in url:
+                    provider_distribution["anthropic"] = provider_distribution.get("anthropic", 0) + 1
+                elif "openai" in url:
+                    provider_distribution["openai"] = provider_distribution.get("openai", 0) + 1
+                elif "googleapis" in url:
+                    provider_distribution["google"] = provider_distribution.get("google", 0) + 1
+                else:
+                    provider_distribution["other"] = provider_distribution.get("other", 0) + 1
+        elif entry.entry_type == "side_effect":
+            side_effect_count += 1
+
+    return {
+        "total_steps": len(cassette.entries),
+        "http_requests_total": http_count,
+        "side_effects_total": side_effect_count,
+        "http_status_distribution": status_distribution,
+        "model_provider_distribution": provider_distribution,
+    }
+
+
 def export_cassette_to_otel_file(
     cassette_path: Path | str,
     output_path: Path | str,
     service_name: str = "rerunner-agent",
+    include_metrics: bool = False,
 ) -> None:
     """Load a cassette and export its contents to an OpenTelemetry JSON file."""
     from rerunner.cassette import Cassette
 
     cassette = Cassette.load(Path(cassette_path), verify_integrity=False)
     payload = export_to_otlp(cassette, service_name=service_name)
+    if include_metrics:
+        payload["metrics"] = compute_cassette_metrics(cassette)
+
     with Path(output_path).open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)

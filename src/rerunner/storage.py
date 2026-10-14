@@ -1,0 +1,211 @@
+"""Remote storage backend interface and implementations for Rerunner cassettes.
+
+Supports local filesystem, AWS S3 (`s3://`), and Google Cloud Storage (`gs://`).
+"""
+
+from __future__ import annotations
+
+import re
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    pass
+
+
+class StorageBackendError(Exception):
+    """Raised when remote or local storage backend operations fail."""
+
+
+class BaseStorageBackend(ABC):
+    """Abstract base class for cassette storage backends."""
+
+    @abstractmethod
+    def read_bytes(self, uri: str) -> bytes:
+        """Read raw bytes of a cassette from the specified URI."""
+
+    @abstractmethod
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        """Write raw bytes of a cassette to the specified URI."""
+
+    @abstractmethod
+    def exists(self, uri: str) -> bool:
+        """Check whether a cassette exists at the specified URI."""
+
+    @abstractmethod
+    def delete(self, uri: str) -> None:
+        """Delete a cassette at the specified URI."""
+
+
+class LocalStorageBackend(BaseStorageBackend):
+    """Local filesystem storage backend."""
+
+    def _to_path(self, uri: str) -> Path:
+        if uri.startswith("file://"):
+            parsed = urlparse(uri)
+            # Support both windows and unix path parsing from file URI
+            path_str = parsed.path
+            if re.match(r"^/[a-zA-Z]:", path_str):
+                path_str = path_str[1:]
+            return Path(path_str)
+        return Path(uri)
+
+    def read_bytes(self, uri: str) -> bytes:
+        path = self._to_path(uri)
+        if not path.exists():
+            raise FileNotFoundError(f"Local cassette file not found: {path}")
+        return path.read_bytes()
+
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        path = self._to_path(uri)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(f"{path.suffix}.tmp")
+        temp_path.write_bytes(data)
+        temp_path.replace(path)
+
+    def exists(self, uri: str) -> bool:
+        return self._to_path(uri).exists()
+
+    def delete(self, uri: str) -> None:
+        path = self._to_path(uri)
+        if path.exists():
+            path.unlink()
+
+
+class S3StorageBackend(BaseStorageBackend):
+    """AWS S3 cassette storage backend (requires boto3)."""
+
+    def __init__(self, s3_client: object | None = None) -> None:
+        self._client = s3_client
+
+    def _get_client(self) -> object:
+        if self._client is None:
+            try:
+                import boto3  # type: ignore[import-untyped]
+                self._client = boto3.client("s3")
+            except ImportError as err:
+                raise StorageBackendError(
+                    "boto3 is required for S3 remote cassette storage. "
+                    "Install it via `pip install rerunner[s3]` or `pip install boto3`."
+                ) from err
+        return self._client
+
+    def _parse_s3_uri(self, uri: str) -> tuple[str, str]:
+        parsed = urlparse(uri)
+        if parsed.scheme != "s3" or not parsed.netloc:
+            raise StorageBackendError(f"Invalid S3 URI format: '{uri}'. Expected 's3://bucket/key'")
+        bucket = parsed.netloc
+        key = parsed.path.lstrip("/")
+        return bucket, key
+
+    def read_bytes(self, uri: str) -> bytes:
+        bucket, key = self._parse_s3_uri(uri)
+        client: Any = self._get_client()
+        try:
+            response = client.get_object(Bucket=bucket, Key=key)
+            return response["Body"].read()  # type: ignore[no-any-return]
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to read cassette from S3 URI '{uri}': {exc}") from exc
+
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        bucket, key = self._parse_s3_uri(uri)
+        client: Any = self._get_client()
+        try:
+            client.put_object(Bucket=bucket, Key=key, Body=data)
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to write cassette to S3 URI '{uri}': {exc}") from exc
+
+    def exists(self, uri: str) -> bool:
+        bucket, key = self._parse_s3_uri(uri)
+        client: Any = self._get_client()
+        try:
+            client.head_object(Bucket=bucket, Key=key)
+            return True
+        except Exception:
+            return False
+
+    def delete(self, uri: str) -> None:
+        bucket, key = self._parse_s3_uri(uri)
+        client: Any = self._get_client()
+        try:
+            client.delete_object(Bucket=bucket, Key=key)
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to delete cassette at S3 URI '{uri}': {exc}") from exc
+
+
+class GCSStorageBackend(BaseStorageBackend):
+    """Google Cloud Storage (GCS) cassette storage backend (requires google-cloud-storage)."""
+
+    def __init__(self, gcs_client: object | None = None) -> None:
+        self._client = gcs_client
+
+    def _get_client(self) -> object:
+        if self._client is None:
+            try:
+                from google.cloud import storage  # type: ignore[import-untyped]
+                self._client = storage.Client()
+            except ImportError as err:
+                raise StorageBackendError(
+                    "google-cloud-storage is required for GCS remote cassette storage. "
+                    "Install it via `pip install rerunner[gcs]` or `pip install google-cloud-storage`."
+                ) from err
+        return self._client
+
+    def _parse_gcs_uri(self, uri: str) -> tuple[str, str]:
+        parsed = urlparse(uri)
+        if parsed.scheme != "gs" or not parsed.netloc:
+            raise StorageBackendError(f"Invalid GCS URI format: '{uri}'. Expected 'gs://bucket/blob_name'")
+        bucket = parsed.netloc
+        blob_name = parsed.path.lstrip("/")
+        return bucket, blob_name
+
+    def read_bytes(self, uri: str) -> bytes:
+        bucket_name, blob_name = self._parse_gcs_uri(uri)
+        client: Any = self._get_client()
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            return blob.download_as_bytes()  # type: ignore[no-any-return]
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to read cassette from GCS URI '{uri}': {exc}") from exc
+
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        bucket_name, blob_name = self._parse_gcs_uri(uri)
+        client: Any = self._get_client()
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.upload_from_string(data)
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to write cassette to GCS URI '{uri}': {exc}") from exc
+
+    def exists(self, uri: str) -> bool:
+        bucket_name, blob_name = self._parse_gcs_uri(uri)
+        client: Any = self._get_client()
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            return blob.exists()  # type: ignore[no-any-return]
+        except Exception:
+            return False
+
+    def delete(self, uri: str) -> None:
+        bucket_name, blob_name = self._parse_gcs_uri(uri)
+        client: Any = self._get_client()
+        try:
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            blob.delete()
+        except Exception as exc:
+            raise StorageBackendError(f"Failed to delete cassette at GCS URI '{uri}': {exc}") from exc
+
+
+def get_storage_backend(uri: str) -> BaseStorageBackend:
+    """Resolve the appropriate storage backend based on URI scheme."""
+    if uri.startswith("s3://"):
+        return S3StorageBackend()
+    if uri.startswith("gs://"):
+        return GCSStorageBackend()
+    return LocalStorageBackend()
