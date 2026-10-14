@@ -1,0 +1,33 @@
+name: 📚 Documentation & Cookbook Recipe Request
+description: Suggest improvements, tutorials, recipe cookbooks, or clarifications for Rerunner docs
+title: "[Docs]: "
+labels: ["documentation", "good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Clear, comprehensive documentation makes open-source tools a delight to use.
+        Thank you for helping make Rerunner documentation even better!
+  - type: textarea
+    id: doc_location
+    attributes:
+      label: Documentation Area / Target Page
+      description: Where should this documentation live? (e.g., README.md, Pytest Quickstart, Cookbooks, CI Guide)
+      placeholder: "e.g., README.md - GitHub Actions CI caching section"
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What needs to be added, fixed, or updated?
+      description: Explain the missing information, unclear section, or new recipe you'd like to see.
+      placeholder: "Provide a detailed explanation or outline of the proposed documentation..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contributing
+      description: Would you like to submit a PR to write this documentation?
+      options:
+        - label: Yes, I would like to submit a PR for this!

@@ -1,0 +1,46 @@
+name: 🔌 Framework / LLM Provider Integration Request
+description: Propose support for a new AI framework, SDK, or model provider (e.g. LlamaIndex, Ollama, CrewAI, LiteLLM)
+title: "[Integration]: "
+labels: ["integration", "enhancement", "ecosystem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping expand the **Rerunner** frontier ecosystem!
+        Rerunner aims to provide zero-friction replay and cassette generation across all major agent runtimes and LLM providers.
+  - type: input
+    id: framework_name
+    attributes:
+      label: Framework / Provider Name
+      description: Name of the framework, library, or provider (e.g., LlamaIndex, CrewAI, LiteLLM, Ollama, Mistral).
+      placeholder: "e.g., LlamaIndex"
+    validations:
+      required: true
+  - type: input
+    id: documentation_url
+    attributes:
+      label: Documentation / Repository URL
+      description: Link to the official documentation or GitHub repository.
+      placeholder: "https://github.com/run-llama/llama_index"
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Target Use Case & Workflow
+      description: How should Rerunner intercept and record requests within this framework? (e.g., via callback handler, client wrapping, or middleware)
+      placeholder: |
+        We want to trace multi-agent queries using:
+        ```python
+        from rerunner.adapters.llamaindex import RerunnerCallbackHandler
+        ```
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to submit a pull request implementing or testing this integration?
+      options:
+        - label: Yes, I would love to submit a PR with guidance from the maintainer!
+        - label: I can help test and review the PR when ready.

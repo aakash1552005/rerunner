@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Rerunner Documentation & Guides
+    url: https://github.com/aakash1552005/rerunner#readme
+    about: Read our comprehensive architecture guide, Pytest quickstart, and SDK examples.
+  - name: 💬 GitHub Discussions & Q&A
+    url: https://github.com/aakash1552005/rerunner/discussions
+    about: Ask questions, share test setup recipes, or discuss agentic testing strategies with the community.
+  - name: 🤝 Contributing Guide & Setup
+    url: https://github.com/aakash1552005/rerunner/blob/main/CONTRIBUTING.md
+    about: Learn how to set up your dev environment, run the test suite, and submit PRs.
+  - name: 🗺️ Strategic Product Roadmap
+    url: https://github.com/aakash1552005/rerunner/blob/main/ROADMAP.md
+    about: Explore upcoming milestones across observability, enterprise governance, and flight recorders.
