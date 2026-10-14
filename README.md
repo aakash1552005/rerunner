@@ -5,7 +5,7 @@
 **Deterministic flight recorder, replay engine, and CI test runner for AI agents.**
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
-[![Release](https://img.shields.io/badge/release-v0.1.2-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
+[![Release](https://img.shields.io/badge/release-v0.2.0-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![RFCs](https://img.shields.io/badge/architecture-Enterprise%20RFCs-purple.svg)](rfcs/)
