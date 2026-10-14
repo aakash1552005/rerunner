@@ -316,11 +316,12 @@ rerunner diff session_v1.jsonl session_v2.jsonl
 
 Contributions from the open-source community and frontier AI research teams are warmly welcomed:
 
-* 🗺️ **Strategic Vision**: Review our [ROADMAP.md](ROADMAP.md) for planned milestones.
-* 🏛️ **Enterprise RFCs**: Propose or review major architectural designs in our [RFC Directory](rfcs/) or open an [RFC Issue](https://github.com/aakash1552005/rerunner/issues/new?template=rfc.yml).
+* 🚀 **First-Time Contributors**: Follow our [5-Minute Onboarding Guide](docs/ONBOARDING.md) to set up and submit your first PR.
 * 🏷️ **Good First Issues**: Grab starter tasks on [GitHub Issues](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 * 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and linting rules.
-* 🌟 **Community**: Special thanks to our open-source contributors for making Rerunner faster, safer, and extensible.
+* 🗺️ **Strategic Vision**: Review our [ROADMAP.md](ROADMAP.md) for planned milestones.
+* 🏛️ **Enterprise RFCs**: Propose or review major architectural designs in our [RFC Directory](rfcs/) or open an [RFC Issue](https://github.com/aakash1552005/rerunner/issues/new?template=rfc.yml).
+* 🏆 **Hall of Fame**: Meet the community members in [AUTHORS.md](AUTHORS.md).
 
 ---
 
