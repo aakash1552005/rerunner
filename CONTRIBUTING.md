@@ -108,4 +108,19 @@ Check out issues on GitHub:
 - [`help wanted`](https://github.com/aakash1552005/rerunner/labels/help%20wanted): High-priority ecosystem integrations and enterprise features.
 - [`rfc`](https://github.com/aakash1552005/rerunner/labels/rfc): Architectural proposals actively seeking feedback.
 
+---
 
+## Recognition & Community
+
+Every contribution matters. Contributors are recognized in:
+- The [GitHub Release Notes](https://github.com/aakash1552005/rerunner/releases) for each version.
+- The project documentation and changelogs.
+- High-impact contributors are invited to join the project core triage team.
+
+If you have questions, ideas, or need guidance on an implementation, feel free to start a thread on [GitHub Discussions](https://github.com/aakash1552005/rerunner/discussions) or open an issue.
+
+---
+
+## License
+
+By contributing to Rerunner, you agree that your contributions will be licensed under the project's [Apache 2.0 License](LICENSE).
