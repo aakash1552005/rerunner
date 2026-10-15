@@ -19,6 +19,8 @@ A heartfelt thank you to everyone who has submitted code, improved documentation
 | Contributor | Focus / Contribution | First Merged PR |
 | :--- | :--- | :---: |
 | **Aakash S S** ([@aakash1552005](https://github.com/aakash1552005)) | Core Engine, Streaming, OTel Exporter, Storage | `#1` |
+| **KeuqS** ([@KeuqS](https://github.com/KeuqS)) | CI Cassette Caching & Cache Invalidation | `#5` |
+| **abhandary14** ([@abhandary14](https://github.com/abhandary14)) | Gzip Cassettes & Server-Sent Events Token Streaming | `#6` |
 <!-- prettier-ignore-end -->
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
