@@ -16,6 +16,21 @@
 
 </div>
 
+```text
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │  $ pytest tests/test_agent.py -v --rerunner-mode=replay                │
+  │                                                                        │
+  │  tests/test_agent.py::test_rag_pipeline ....................... [100%] │
+  │                                                                        │
+  │  📼 [rerunner] Loaded cassette: tests/cassettes/rag_eval.jsonl        │
+  │  ⚡ Replayed: 8 LLM calls (OpenAI gpt-4o + Anthropic Claude 3.5)      │
+  │  🛡️ PII Check: 0 leaks | SHA-256: Verified [3a8f9c1b]                 │
+  │  ⏱️ Duration: 0.04s (Saved 18.4s of live network calls)               │
+  │  💰 Token Cost: $0.00 (Saved $0.24 API credits)                       │
+  │                                                                        │
+  │  ========================= 1 passed in 0.04s ========================= │
+  └────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

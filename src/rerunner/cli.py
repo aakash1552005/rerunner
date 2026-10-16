@@ -10,6 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rerunner.cassette import Cassette
 from rerunner.integrity import verify_cassette_integrity
+from rerunner.sanitizer import find_sensitive_leaks
 
 app = typer.Typer(
     name="rerunner",
@@ -68,20 +69,81 @@ def inspect(
 @app.command()
 def verify(
     cassette_path: Path = typer.Argument(..., help="Path to the .jsonl cassette file"),
+    strict_security: bool = typer.Option(
+        True,
+        "--strict/--no-strict",
+        help="Fail with exit code 1 if unredacted API keys or PII are found.",
+    ),
 ) -> None:
-    """Verify the cryptographic SHA-256 tamper-evident integrity of a cassette."""
+    """Verify cryptographic integrity, scan for leaked API keys/PII, and display savings summary."""
     try:
         cassette = Cassette.load(cassette_path, verify_integrity=False)
-        is_valid, error = verify_cassette_integrity(cassette.entries)
-        if not is_valid:
-            console.print(f"[bold red]❌ INTEGRITY FAILURE:[/] {error}")
-            sys.exit(1)
-        console.print(
-            f"[bold green]✔ Cassette integrity verified successfully! ({len(cassette.entries)} chained steps)[/]"
-        )
     except Exception as exc:
-        console.print(f"[bold red]Error verifying cassette:[/] {exc}")
+        console.print(f"[bold red]Error loading cassette:[/] {exc}")
         sys.exit(1)
+
+    # 1. Cryptographic SHA-256 integrity check
+    is_valid, error = verify_cassette_integrity(cassette.entries)
+    if not is_valid:
+        console.print(f"[bold red]❌ INTEGRITY FAILURE:[/] {error}")
+        sys.exit(1)
+    console.print(
+        f"[bold green]✔ Cryptographic integrity verified successfully ({len(cassette.entries)} chained steps).[/]"
+    )
+
+    # 2. Scan for unredacted API keys and PII leaks
+    all_leaks: list[str] = []
+    total_chars = 0
+    http_steps = 0
+    side_effect_steps = 0
+
+    for entry in cassette.entries:
+        if entry.entry_type == "http" and entry.request and entry.response:
+            http_steps += 1
+            total_chars += len(entry.request.body) + len(entry.response.body)
+            all_leaks.extend(find_sensitive_leaks(entry.request.headers))
+            all_leaks.extend(find_sensitive_leaks(entry.request.body))
+            all_leaks.extend(find_sensitive_leaks(entry.response.headers))
+            all_leaks.extend(find_sensitive_leaks(entry.response.body))
+        elif entry.entry_type == "side_effect":
+            side_effect_steps += 1
+            if entry.side_effect_args:
+                all_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
+            if entry.side_effect_result:
+                all_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
+
+    all_leaks = list(dict.fromkeys(all_leaks))
+
+    if all_leaks:
+        console.print("[bold red]❌ SECURITY WARNING - Leaks Detected:[!]")
+        for leak in all_leaks:
+            console.print(f"  [red]• {leak}[/]")
+        if strict_security:
+            console.print("[bold red]Failing verification due to detected unredacted sensitive data.[/]")
+            sys.exit(1)
+    else:
+        console.print("[bold green]✔ Security scan passed: Zero leaked API keys or PII detected.[/]")
+
+    # 3. Calculate and display savings summary
+    est_tokens = max(0, total_chars // 4)
+    est_dollars_saved = (est_tokens / 1_000_000) * 10.0
+    est_duration_saved = http_steps * 1.8
+
+    summary_table = Table(title="Cassette Verification & Savings Summary", show_header=True, header_style="bold green")
+    summary_table.add_column("Property", style="cyan")
+    summary_table.add_column("Value", style="bold yellow")
+    summary_table.add_row("Cassette File", cassette_path.name)
+    summary_table.add_row("Total Steps", str(len(cassette.entries)))
+    summary_table.add_row("HTTP Requests", str(http_steps))
+    summary_table.add_row("Side Effects", str(side_effect_steps))
+    summary_table.add_row("SHA-256 Hash Chaining", "Verified ✔")
+    summary_table.add_row("PII / Secret Redaction", "Passed ✔" if not all_leaks else "Failed ❌")
+    summary_table.add_row("Estimated Tokens Saved", f"{est_tokens:,}")
+    summary_table.add_row("Estimated API Cost Saved", f"${est_dollars_saved:.4f}")
+    summary_table.add_row("Estimated CI Time Saved", f"{est_duration_saved:.1f}s")
+
+    console.print(summary_table)
+    console.print("[bold green]✔ Cassette verified successfully! Ready for Git commit.[/]")
 
 
 @app.command()

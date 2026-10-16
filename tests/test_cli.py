@@ -22,10 +22,12 @@ def test_cli_inspect_and_verify(temp_cassette_path: Path) -> None:
     assert result.exit_code == 0
     assert "Rerunner Cassette Summary" in result.output
 
-    # 3. Test verify command
+    # 3. Test verify command on clean cassette
     result_verify = runner.invoke(app, ["verify", str(temp_cassette_path)])
     assert result_verify.exit_code == 0
-    assert "Cassette integrity verified successfully" in result_verify.output
+    assert "Cryptographic integrity verified successfully" in result_verify.output
+    assert "Security scan passed" in result_verify.output
+    assert "Cassette Verification & Savings Summary" in result_verify.output
 
     # 4. Test export-otel command
     out_otel = temp_cassette_path.with_suffix(".otel.json")
@@ -33,4 +35,41 @@ def test_cli_inspect_and_verify(temp_cassette_path: Path) -> None:
     assert result_otel.exit_code == 0
     assert "Successfully exported cassette to OpenTelemetry" in result_otel.output
     assert out_otel.exists()
+
+
+def test_cli_verify_detects_leaked_secret(tmp_path: Path) -> None:
+    from rerunner.cassette import Cassette
+    from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+    leaky_cassette = tmp_path / "leaky.jsonl"
+    c = Cassette(leaky_cassette)
+    c.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST",
+                url="https://api.openai.com/v1/chat/completions",
+                headers={"authorization": "Bearer sk-proj-1234567890abcdef1234567890abcdef12345"},
+                body='{"prompt": "hello"}',
+            ),
+            response=RecordedResponse(
+                status_code=200,
+                headers={},
+                body='{"reply": "hi"}',
+            ),
+        )
+    )
+    c.save()
+
+    # Verify fails in strict mode
+    result = runner.invoke(app, ["verify", str(leaky_cassette), "--strict"])
+    assert result.exit_code == 1
+    assert "SECURITY WARNING" in result.output
+    assert "Found unredacted pattern" in result.output or "Unredacted sensitive header" in result.output
+
+    # Verify passes in non-strict mode with warning
+    result_non_strict = runner.invoke(app, ["verify", str(leaky_cassette), "--no-strict"])
+    assert result_non_strict.exit_code == 0
+    assert "SECURITY WARNING" in result_non_strict.output
 
