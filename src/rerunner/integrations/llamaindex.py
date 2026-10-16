@@ -19,7 +19,7 @@ except ImportError:
             self.event_ends_to_ignore = event_ends_to_ignore or []
 
 
-class LlamaIndexRerunnerHandler(BaseCallbackHandler):
+class LlamaIndexRerunnerHandler(BaseCallbackHandler):  # type: ignore[misc]
     """Callback handler compatible with LlamaIndex query engines, agents, and RAG pipelines."""
 
     def __init__(
