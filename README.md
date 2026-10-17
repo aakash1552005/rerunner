@@ -5,9 +5,12 @@
 **Deterministic flight recorder, replay engine, and CI test runner for AI agents.**
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
-[![Release](https://img.shields.io/badge/release-v0.2.0-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
+[![Release](https://img.shields.io/badge/release-v0.2.1-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
+[![PyPI](https://img.shields.io/pypi/v/rerunner.svg)](https://pypi.org/project/rerunner/)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aakash1552005/rerunner)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Governance](https://img.shields.io/badge/governance-CNCF%20Style-purple.svg)](GOVERNANCE.md)
 [![RFCs](https://img.shields.io/badge/architecture-Enterprise%20RFCs-purple.svg)](rfcs/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy%20strict-blue.svg)](https://mypy-lang.org/)
@@ -331,6 +334,8 @@ rerunner diff session_v1.jsonl session_v2.jsonl
 
 Contributions from the open-source community and frontier AI research teams are warmly welcomed:
 
+* 🚀 **One-Click Cloud Dev**: Launch an instant ready-to-code workspace via [GitHub Codespaces](https://codespaces.new/aakash1552005/rerunner).
+* 📜 **Governance & Maintainership**: Review our [CNCF-style Governance Model & Review SLA](GOVERNANCE.md).
 * 🚀 **First-Time Contributors**: Follow our [5-Minute Onboarding Guide](docs/ONBOARDING.md) to set up and submit your first PR.
 * 🏷️ **Good First Issues**: Grab starter tasks on [GitHub Issues](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 * 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and linting rules.
