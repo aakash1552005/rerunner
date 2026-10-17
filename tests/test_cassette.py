@@ -159,3 +159,53 @@ def test_load_detects_tampering_unless_verification_is_disabled(
     loaded = Cassette.load(cassette_path, verify_integrity=False)
     assert loaded.entries[0].response is not None
     assert loaded.entries[0].response.status_code == 503
+
+
+def test_cassette_zstd_compression_roundtrip(tmp_path: Path) -> None:
+    """Cassettes ending in .zst are saved and loaded transparently using zstandard."""
+    try:
+        import zstandard
+    except ImportError:
+        pytest.skip("zstandard is not installed")
+
+    cassette_path = tmp_path / "compressed.jsonl.zst"
+    cassette = Cassette(cassette_path)
+    entry = make_http_entry(request_body=b'{"prompt": "hello"}', response_body=b'{"reply": "world"}')
+    cassette.append(entry)
+    cassette.save()
+
+    assert cassette_path.exists()
+    assert not cassette_path.read_bytes().startswith(b"{")
+
+    reloaded = Cassette.load(cassette_path)
+    assert len(reloaded.entries) == 1
+    assert reloaded.entries[0].entry_hash == entry.entry_hash
+    assert reloaded.entries[0].response is not None
+    assert reloaded.entries[0].response.body == b'{"reply": "world"}'
+
+
+def test_cassette_zstd_missing_dependency_raises_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing zstandard dependency raises a clear descriptive CassetteError."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "zstandard":
+            raise ImportError("No module named 'zstandard'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    cassette = Cassette(tmp_path / "test.jsonl.zst")
+    cassette.append(make_http_entry())
+    with pytest.raises(CassetteError, match="zstandard is required"):
+        cassette.save()
+
+    dummy_zst = tmp_path / "dummy.jsonl.zst"
+    dummy_zst.write_bytes(b"dummy")
+    with pytest.raises(CassetteError, match="zstandard is required"):
+        Cassette.load(dummy_zst)
+

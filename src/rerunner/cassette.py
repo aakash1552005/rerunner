@@ -48,6 +48,17 @@ class Cassette:
         if uri_str.endswith(".gz"):
             with gzip.open(io.BytesIO(raw_bytes), "rt", encoding="utf-8") as file:
                 lines = file.read().splitlines()
+        elif uri_str.endswith(".zst"):
+            try:
+                import zstandard as zstd  # type: ignore[import-untyped]
+            except ImportError as err:
+                raise CassetteError(
+                    "zstandard is required to load .zst cassettes. "
+                    "Install it via `pip install rerunner[zstd]` or `pip install zstandard`."
+                ) from err
+            dctx = zstd.ZstdDecompressor()
+            decompressed = dctx.decompress(raw_bytes)
+            lines = decompressed.decode("utf-8").splitlines()
         else:
             lines = raw_bytes.decode("utf-8").splitlines()
 
@@ -94,7 +105,7 @@ class Cassette:
         self._last_hash = entry.entry_hash
 
     def save(self) -> None:
-        """Write the complete cassette to disk or remote storage atomically, using gzip compression for .gz paths."""
+        """Write the complete cassette to disk or remote storage atomically, using gzip (.gz) or zstandard (.zst)."""
         backend = get_storage_backend(self.uri)
 
         # Assemble formatted payload
@@ -107,6 +118,16 @@ class Cassette:
             with gzip.open(buf, "wt", encoding="utf-8") as gz_file:
                 gz_file.write(text_content)
             data_bytes = buf.getvalue()
+        elif self.uri.endswith(".zst"):
+            try:
+                import zstandard as zstd  # type: ignore[import-untyped]
+            except ImportError as err:
+                raise CassetteError(
+                    "zstandard is required to save .zst cassettes. "
+                    "Install it via `pip install rerunner[zstd]` or `pip install zstandard`."
+                ) from err
+            cctx = zstd.ZstdCompressor()
+            data_bytes = cctx.compress(text_content.encode("utf-8"))
         else:
             data_bytes = text_content.encode("utf-8")
 
