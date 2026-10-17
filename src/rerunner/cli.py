@@ -20,6 +20,32 @@ app = typer.Typer(
 console = Console()
 
 
+def version_callback(value: bool) -> None:
+    if value:
+        try:
+            import importlib.metadata
+
+            ver = importlib.metadata.version("rerunner")
+        except Exception:
+            ver = "0.2.1"
+        console.print(f"[bold cyan]rerunner[/] version [bold green]{ver}[/]")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool | None = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="Show application version and exit.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Deterministic flight recorder, replay engine, and CI test runner for AI agents."""
+
+
 @app.command()
 def inspect(
     cassette_path: Path = typer.Argument(..., help="Path to a .jsonl or .jsonl.gz cassette file"),
