@@ -163,14 +163,11 @@ def test_load_detects_tampering_unless_verification_is_disabled(
 
 def test_cassette_zstd_compression_roundtrip(tmp_path: Path) -> None:
     """Cassettes ending in .zst are saved and loaded transparently using zstandard."""
-    try:
-        import zstandard
-    except ImportError:
-        pytest.skip("zstandard is not installed")
+    pytest.importorskip("zstandard")
 
     cassette_path = tmp_path / "compressed.jsonl.zst"
     cassette = Cassette(cassette_path)
-    entry = make_http_entry(request_body=b'{"prompt": "hello"}', response_body=b'{"reply": "world"}')
+    entry = make_http_entry(step=1)
     cassette.append(entry)
     cassette.save()
 
@@ -181,7 +178,7 @@ def test_cassette_zstd_compression_roundtrip(tmp_path: Path) -> None:
     assert len(reloaded.entries) == 1
     assert reloaded.entries[0].entry_hash == entry.entry_hash
     assert reloaded.entries[0].response is not None
-    assert reloaded.entries[0].response.body == b'{"reply": "world"}'
+    assert reloaded.entries[0].response.body == '{"message":{"role":"assistant","content":"Hello"}}'
 
 
 def test_cassette_zstd_missing_dependency_raises_error(
