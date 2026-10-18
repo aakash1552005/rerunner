@@ -35,7 +35,7 @@ from rerunner.storage import (
 )
 from rerunner.transport import CassetteTransport
 
-__version__ = "0.2.1"
+from rerunner._version import __version__
 
 __all__ = [
     "SECRET_PATTERNS",
@@ -53,6 +53,7 @@ __all__ = [
     "SessionContext",
     "SideEffectError",
     "StorageBackendError",
+    "__version__",
     "compute_cassette_metrics",
     "export_cassette_to_otel_file",
     "export_to_otlp",

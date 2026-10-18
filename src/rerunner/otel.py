@@ -37,7 +37,7 @@ def export_to_otlp(
     Returns:
         A dictionary compliant with the OpenTelemetry OTLP/HTTP trace payload specification.
     """
-    from rerunner import __version__
+    from rerunner._version import __version__
 
     agent_id = cassette.metadata.agent_id or "default-agent"
     base_time_ns = int(cassette.metadata.created_at * 1_000_000_000)
