@@ -69,6 +69,13 @@ def rerunner_transport(
     request: pytest.FixtureRequest,
 ) -> Generator[httpx.BaseTransport, None, None]:
     """Pytest fixture providing a pre-configured CassetteTransport for the current test."""
+    from rerunner.patcher import get_active_session
+
+    active_session = get_active_session()
+    if active_session is not None:
+        yield active_session.transport
+        return
+
     marker = request.node.get_closest_marker("rerunner")
     cassette_path = "cassette.jsonl"
     if marker and marker.args:
@@ -91,6 +98,13 @@ def rerunner_session(
     request: pytest.FixtureRequest,
 ) -> Generator[Session, None, None]:
     """Pytest fixture providing an active Session."""
+    from rerunner.patcher import get_active_session
+
+    active_session = get_active_session()
+    if active_session is not None:
+        yield active_session
+        return
+
     marker = request.node.get_closest_marker("rerunner")
     cassette_path = "cassette.jsonl"
     if marker and marker.args:

@@ -80,7 +80,7 @@ class _RecordingAsyncByteStream(httpx.AsyncByteStream):
         self.chunk_delays_ms: list[float] = []
         self._last_chunk_time: float | None = None
         self._had_exception = False
-        self._completed_cleanly = False
+        self._stream_completed = False
         self._finalized = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
@@ -96,35 +96,39 @@ class _RecordingAsyncByteStream(httpx.AsyncByteStream):
                 self._last_chunk_time = now
                 self.chunks.append(chunk)
                 self.chunk_delays_ms.append(round(delay_ms, 2))
+                if b"data: [DONE]" in chunk:
+                    self._stream_completed = True
                 yield chunk
-            self._completed_cleanly = True
+            self._stream_completed = True
+        except GeneratorExit:
+            pass
         except Exception:
             self._had_exception = True
             raise
         finally:
-            if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
-                self._completed_cleanly = True
+            if (self._stream_completed and not self._had_exception) or self.record_partial_streams:
                 self._finalize()
 
     async def aclose(self) -> None:
         try:
             await self.real_response.aclose()
         finally:
-            if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
-                self._completed_cleanly = True
-            self._finalize()
+            if (self._stream_completed and not self._had_exception) or self.record_partial_streams:
+                self._finalize()
 
     def __del__(self) -> None:
-        if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
-            self._completed_cleanly = True
-        self._finalize()
+        if (self._stream_completed and not self._had_exception) or self.record_partial_streams:
+            self._finalize()
 
     def _finalize(self) -> None:
         if self._finalized:
             return
         self._finalized = True
 
-        if not self._completed_cleanly and not self.record_partial_streams:
+        if (
+            not (self._stream_completed and not self._had_exception)
+            and not self.record_partial_streams
+        ):
             return
 
         response_bytes = b"".join(self.chunks)

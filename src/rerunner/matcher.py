@@ -8,6 +8,8 @@ import re
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from rerunner.sanitizer import SENSITIVE_QUERY_PARAMS
+
 if TYPE_CHECKING:
     from rerunner.models import RecordedRequest
 
@@ -115,12 +117,20 @@ def normalize_body_fuzzy(body: bytes | str | None) -> str:
 
 
 def normalize_url(url: str) -> str:
-    """Normalize URL by sorting query parameters."""
+    """Normalize URL by sorting query parameters and redacting sensitive parameters."""
     parsed = urlparse(url)
     if not parsed.query:
         return url
-    query_params = sorted(parse_qsl(parsed.query))
-    normalized_query = urlencode(query_params)
+    raw_params = parse_qsl(parsed.query, keep_blank_values=True)
+    normalized_params: list[tuple[str, str]] = []
+    for k, v in raw_params:
+        k_lower = k.lower().strip()
+        if k_lower in SENSITIVE_QUERY_PARAMS:
+            normalized_params.append((k_lower, "[REDACTED]"))
+        else:
+            normalized_params.append((k, v))
+    normalized_params.sort()
+    normalized_query = urlencode(normalized_params)
     return urlunparse(
         (
             parsed.scheme,

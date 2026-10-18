@@ -7,13 +7,18 @@ sanitization of sensitive arguments/results, and thread/async context safety via
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 import functools
 import hashlib
 import inspect
 import json
+import threading
+import typing
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, overload
+
+from pydantic import BaseModel
 
 from rerunner.cassette import Cassette
 from rerunner.models import CassetteEntry
@@ -44,6 +49,75 @@ _CURRENT_SIDE_EFFECT_STEP_VAR: contextvars.ContextVar[int] = contextvars.Context
 _SIDE_EFFECT_CURSORS_VAR: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "_rerunner_se_cursors", default=None
 )
+_CURSOR_LOCK = threading.Lock()
+
+
+def _rehydrate_result(func: Callable[..., Any], result: Any) -> Any:
+    """Reconstruct Pydantic BaseModel or dataclass instances from serialized dicts during replay."""
+    if not isinstance(result, dict):
+        return result
+
+    ret_type: Any = None
+    try:
+        closure_vars = inspect.getclosurevars(func)
+        localns = {**closure_vars.globals, **closure_vars.nonlocals}
+        hints = typing.get_type_hints(func, localns=localns)
+        ret_type = hints.get("return")
+    except Exception:
+        pass
+
+    if ret_type is None:
+        annotations = getattr(func, "__annotations__", {})
+        raw_ret = annotations.get("return")
+        if isinstance(raw_ret, type):
+            ret_type = raw_ret
+        elif isinstance(raw_ret, str):
+            closure_vars = inspect.getclosurevars(func)
+            if raw_ret in closure_vars.nonlocals:
+                candidate = closure_vars.nonlocals[raw_ret]
+                if isinstance(candidate, type):
+                    ret_type = candidate
+            elif raw_ret in closure_vars.globals:
+                candidate = closure_vars.globals[raw_ret]
+                if isinstance(candidate, type):
+                    ret_type = candidate
+
+    if ret_type is None:
+        return result
+
+    try:
+        origin = typing.get_origin(ret_type)
+        candidate_types = [ret_type]
+        if origin is typing.Union or (hasattr(typing, "UnionType") and origin is typing.UnionType):
+            candidate_types = [arg for arg in typing.get_args(ret_type) if arg is not type(None)]
+
+        for target in candidate_types:
+            if isinstance(target, type):
+                if issubclass(target, BaseModel):
+                    return target.model_validate(result)
+                if dataclasses.is_dataclass(target):
+                    return target(**result)
+    except Exception:
+        pass
+    return result
+
+
+def _get_and_advance_cursor(
+    call_key: str,
+    matching_entries: list[CassetteEntry],
+) -> CassetteEntry | None:
+    """Thread-safe and async-safe cursor lookup and increment for side-effects and tools."""
+    with _CURSOR_LOCK:
+        cursors = _SIDE_EFFECT_CURSORS_VAR.get()
+        if cursors is None:
+            cursors = {}
+            _SIDE_EFFECT_CURSORS_VAR.set(cursors)
+        cursor = cursors.get(call_key, 0)
+        if cursor < len(matching_entries):
+            matched = matching_entries[cursor]
+            cursors[call_key] = cursor + 1
+            return matched
+        return None
 
 
 def compute_side_effect_key(name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
@@ -123,12 +197,6 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                         f"Cannot replay side-effect '{fn_name}': no active cassette is configured."
                     )
 
-                cursors = _SIDE_EFFECT_CURSORS_VAR.get()
-                if cursors is None:
-                    cursors = {}
-                    _SIDE_EFFECT_CURSORS_VAR.set(cursors)
-                cursor = cursors.get(call_key, 0)
-
                 matching_entries = [
                     entry
                     for entry in cassette.entries
@@ -148,12 +216,9 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                 ]
 
                 target_matches = exact_arg_matches if exact_arg_matches else matching_entries
-
-                if cursor < len(target_matches):
-                    matched_entry = target_matches[cursor]
-                    cursors[call_key] = cursor + 1
-                    _SIDE_EFFECT_CURSORS_VAR.set(cursors)
-                    return matched_entry.side_effect_result
+                matched_entry = _get_and_advance_cursor(call_key, target_matches)
+                if matched_entry is not None:
+                    return _rehydrate_result(func, matched_entry.side_effect_result)
 
                 raise SideEffectError(
                     f"[Replay Step {step}] Unrecorded side effect '{fn_name}' (call_key: {call_key[:8]}). "
@@ -200,12 +265,6 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                         f"Cannot replay side-effect '{fn_name}': no active cassette is configured."
                     )
 
-                cursors = _SIDE_EFFECT_CURSORS_VAR.get()
-                if cursors is None:
-                    cursors = {}
-                    _SIDE_EFFECT_CURSORS_VAR.set(cursors)
-                cursor = cursors.get(call_key, 0)
-
                 matching_entries = [
                     entry
                     for entry in cassette.entries
@@ -225,12 +284,9 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                 ]
 
                 target_matches = exact_arg_matches if exact_arg_matches else matching_entries
-
-                if cursor < len(target_matches):
-                    matched_entry = target_matches[cursor]
-                    cursors[call_key] = cursor + 1
-                    _SIDE_EFFECT_CURSORS_VAR.set(cursors)
-                    return matched_entry.side_effect_result
+                matched_entry = _get_and_advance_cursor(call_key, target_matches)
+                if matched_entry is not None:
+                    return _rehydrate_result(func, matched_entry.side_effect_result)
 
                 raise SideEffectError(
                     f"[Replay Step {step}] Unrecorded side effect '{fn_name}' (call_key: {call_key[:8]}). "
@@ -326,17 +382,11 @@ def record_tool(
                         == call_key
                     ]
                     candidates = exact if exact else matching
-
-                    cursors = _SIDE_EFFECT_CURSORS_VAR.get() or {}
-                    cursor = cursors.get(call_key, 0)
-
-                    if cursor < len(candidates):
-                        match = candidates[cursor]
-                        cursors[call_key] = cursor + 1
-                        _SIDE_EFFECT_CURSORS_VAR.set(cursors)
+                    match = _get_and_advance_cursor(call_key, candidates)
+                    if match is not None:
                         if match.side_effect_exception is not None:
                             raise RuntimeError(match.side_effect_exception)
-                        return match.side_effect_result
+                        return _rehydrate_result(func, match.side_effect_result)
 
                     raise SideEffectError(
                         f"[Replay Step {step}] No recorded tool execution found for '{fn_name}' "
@@ -405,17 +455,11 @@ def record_tool(
                         == call_key
                     ]
                     candidates = exact if exact else matching
-
-                    cursors = _SIDE_EFFECT_CURSORS_VAR.get() or {}
-                    cursor = cursors.get(call_key, 0)
-
-                    if cursor < len(candidates):
-                        match = candidates[cursor]
-                        cursors[call_key] = cursor + 1
-                        _SIDE_EFFECT_CURSORS_VAR.set(cursors)
+                    match = _get_and_advance_cursor(call_key, candidates)
+                    if match is not None:
                         if match.side_effect_exception is not None:
                             raise RuntimeError(match.side_effect_exception)
-                        return match.side_effect_result
+                        return _rehydrate_result(func, match.side_effect_result)
 
                     raise SideEffectError(
                         f"[Replay Step {step}] No recorded tool execution found for '{fn_name}' "

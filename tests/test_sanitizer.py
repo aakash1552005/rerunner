@@ -7,6 +7,7 @@ from rerunner.sanitizer import (
     sanitize_headers,
     sanitize_payload,
     sanitize_string,
+    sanitize_url,
 )
 
 
@@ -75,3 +76,14 @@ def test_sanitize_with_custom_patterns() -> None:
     text = "Project ticket is INTERNAL-9876"
     cleaned = sanitize_string(text, custom_patterns=custom)
     assert cleaned == "Project ticket is [REDACTED_INTERNAL_ID]"
+
+
+def test_sanitize_url_sensitive_query_parameters() -> None:
+    raw_url = "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSySecret123&client_secret=super_secret&token=tok_999&search=test_term"
+    cleaned = sanitize_url(raw_url)
+    assert "AIzaSySecret123" not in cleaned
+    assert "super_secret" not in cleaned
+    assert "tok_999" not in cleaned
+    assert "key=%5BREDACTED%5D" in cleaned or "key=[REDACTED]" in cleaned
+    assert "client_secret=%5BREDACTED%5D" in cleaned or "client_secret=[REDACTED]" in cleaned
+    assert "search=test_term" in cleaned

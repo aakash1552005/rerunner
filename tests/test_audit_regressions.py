@@ -7,14 +7,16 @@ from pathlib import Path
 import httpx
 import pytest
 
+from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette
+from rerunner.integrations.anthropic import wrap_anthropic
+from rerunner.integrations.openai import wrap_openai
 from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
+from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
 from rerunner.sanitizer import sanitize_body, sanitize_string, sanitize_url
+from rerunner.session import Session
 from rerunner.side_effects import SideEffectError, set_active_cassette, side_effect
 from rerunner.transport import CassetteTransport
-from rerunner.async_transport import AsyncCassetteTransport
-from rerunner.integrations.openai import wrap_openai
-from rerunner.integrations.anthropic import wrap_anthropic
 
 
 def test_sanitizer_preserves_valid_json_and_numeric_timestamps() -> None:
@@ -55,7 +57,12 @@ def test_url_sanitizer_removes_api_keys_from_query_parameters() -> None:
     )
     cleaned = sanitize_url(raw_url)
     assert "AIzaSy" not in cleaned
-    assert "key=%5BREDACTED_API_KEY%5D" in cleaned or "key=[REDACTED_API_KEY]" in cleaned
+    assert (
+        "key=%5BREDACTED%5D" in cleaned
+        or "key=[REDACTED]" in cleaned
+        or "key=%5BREDACTED_API_KEY%5D" in cleaned
+        or "key=[REDACTED_API_KEY]" in cleaned
+    )
     assert "client=test" in cleaned
 
 
@@ -278,6 +285,37 @@ def test_async_client_wrappers_attach_async_transports(tmp_path: Path) -> None:
     assert isinstance(wrapped_anthropic._client._transport, AsyncCassetteTransport)
     assert len(wrapped_anthropic._client._mounts) == 0
 
-    # Test sanitize_string directly
+
+def test_session_teardown_does_not_clobber_externally_recorded_cassette(tmp_path: Path) -> None:
+    """When a session has 0 entries in memory, it must not overwrite an existing non-empty cassette on disk."""
+    cassette_file = tmp_path / "coexisting.jsonl"
+
+    # Pre-populate cassette with 1 valid entry on disk
+    entry = CassetteEntry(
+        step=1,
+        entry_type="http",
+        request=RecordedRequest(
+            method="GET", url="https://example.com/api", headers={}, body="", request_key="k1"
+        ),
+        response=RecordedResponse(status_code=200, headers={}, body="OK"),
+    )
+    c = Cassette(cassette_file)
+    c.append(entry)
+    c.save()
+    assert len(c.entries) == 1
+
+    # Open a Session pointing to the same file in record mode, but perform no requests through this session's transport
+    with Session(cassette_file, mode="record"):
+        pass
+
+    # The file on disk must retain the existing entry and not be overwritten with a header-only empty file
+    reloaded = Cassette.load(cassette_file)
+    assert len(reloaded.entries) == 1
+    req = reloaded.entries[0].request
+    assert req is not None
+    assert req.url == "https://example.com/api"
+
+
+def test_sanitize_credit_card_luhn_direct() -> None:
     cleaned_card = sanitize_string("Card 4111 2222 3333 4444")
     assert "[REDACTED_CREDIT_CARD]" in cleaned_card

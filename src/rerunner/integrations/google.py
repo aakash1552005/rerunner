@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 import httpx
+from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.transport import CassetteTransport
 
 if TYPE_CHECKING:
@@ -19,31 +20,61 @@ def wrap_google_genai(
     """Attach a Rerunner CassetteTransport to an existing Google GenAI or Vertex AI client instance.
 
     Works with both the modern `google-genai` SDK and custom HTTP-based Gemini clients.
-
-    Example:
-        from google import genai
-        from rerunner.integrations import wrap_google_genai
-
-        client = wrap_google_genai(genai.Client(), "gemini_session.jsonl", mode="replay")
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents="Summarize this telemetry."
-        )
+    Supports both synchronous and asynchronous client interfaces (e.g. client.aio).
     """
-    transport = CassetteTransport(cassette_path=cassette_path, mode=mode, fork_step=fork_step)
+    sync_transport = CassetteTransport(cassette_path=cassette_path, mode=mode, fork_step=fork_step)
+    async_transport = AsyncCassetteTransport(
+        cassette_path=cassette_path, mode=mode, fork_step=fork_step
+    )
 
-    # If the client has an inner httpx client (_client or http_client or _http_client)
+    # 1. Direct AsyncClient instance
+    if isinstance(client, httpx.AsyncClient):
+        client._transport = async_transport
+        return client
+
+    # 2. Sync client wrapping
     if hasattr(client, "_client") and hasattr(client._client, "_transport"):
-        client._client._transport = transport
+        if isinstance(client._client, httpx.AsyncClient):
+            client._client._transport = async_transport
+        else:
+            client._client._transport = sync_transport
     elif hasattr(client, "http_client") and hasattr(client.http_client, "_transport"):
-        client.http_client._transport = transport
+        if isinstance(client.http_client, httpx.AsyncClient):
+            client.http_client._transport = async_transport
+        else:
+            client.http_client._transport = sync_transport
     elif hasattr(client, "_http_client") and hasattr(client._http_client, "_transport"):
-        client._http_client._transport = transport
+        if isinstance(client._http_client, httpx.AsyncClient):
+            client._http_client._transport = async_transport
+        else:
+            client._http_client._transport = sync_transport
     elif hasattr(client, "_api_client") and hasattr(client._api_client, "_transport"):
-        client._api_client._transport = transport
+        client._api_client._transport = sync_transport
     else:
-        # Generic fallback: set httpx client with Rerunner transport
-        client._client = httpx.Client(transport=transport)
+        # Generic fallback
+        client._client = httpx.Client(transport=sync_transport)
+
+    # 3. Asynchronous client wrapping (client.aio, _async_httpx_client, _async_client, async_client)
+    for async_attr in ("aio", "_async_httpx_client", "_async_client", "async_client"):
+        if hasattr(client, async_attr):
+            async_obj = getattr(client, async_attr)
+            if async_obj is not None:
+                if isinstance(async_obj, httpx.AsyncClient):
+                    async_obj._transport = async_transport
+                elif hasattr(async_obj, "_client") and hasattr(async_obj._client, "_transport"):
+                    async_obj._client._transport = async_transport
+                elif hasattr(async_obj, "http_client") and hasattr(
+                    async_obj.http_client, "_transport"
+                ):
+                    async_obj.http_client._transport = async_transport
+                elif hasattr(async_obj, "_http_client") and hasattr(
+                    async_obj._http_client, "_transport"
+                ):
+                    async_obj._http_client._transport = async_transport
+                elif hasattr(async_obj, "_api_client") and hasattr(
+                    async_obj._api_client, "_transport"
+                ):
+                    async_obj._api_client._transport = async_transport
 
     return client
 

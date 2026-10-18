@@ -7,6 +7,7 @@ Safe for JSON payloads and preserves numeric values (e.g. Unix timestamps) and s
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from typing import Any
@@ -55,6 +56,7 @@ SENSITIVE_QUERY_PARAMS: set[str] = {
     "apikey",
     "token",
     "access_token",
+    "client_secret",
     "auth",
     "secret",
     "password",
@@ -162,7 +164,7 @@ def sanitize_url(
     for k, v in query_params:
         k_lower = k.lower().strip()
         if k_lower in SENSITIVE_QUERY_PARAMS:
-            sanitized_params.append((k, "[REDACTED_API_KEY]"))
+            sanitized_params.append((k, "[REDACTED]"))
         else:
             sanitized_val = sanitize_string(v, custom_patterns=custom_patterns)
             sanitized_params.append((k, sanitized_val))
@@ -193,6 +195,16 @@ def sanitize_payload(
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
 ) -> Any:
     """Recursively sanitize dicts, lists, and strings for safe storage without mutating numbers or booleans."""
+    if hasattr(data, "model_dump") and callable(data.model_dump):
+        try:
+            return sanitize_payload(data.model_dump(mode="python"), custom_patterns=custom_patterns)
+        except Exception:
+            pass
+    if dataclasses.is_dataclass(data) and not isinstance(data, type):
+        try:
+            return sanitize_payload(dataclasses.asdict(data), custom_patterns=custom_patterns)
+        except Exception:
+            pass
     if isinstance(data, str):
         return sanitize_string(data, custom_patterns=custom_patterns)
     if isinstance(data, dict):

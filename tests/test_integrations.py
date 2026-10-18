@@ -54,3 +54,55 @@ def test_langchain_callback_handler(temp_cassette_path: Path) -> None:
     handler.on_llm_start({}, ["Write code"])
     handler.on_tool_start({}, "Search web")
     assert handler.step_count == 2
+    handler.close()
+
+
+def test_wrap_google_genai_async(temp_cassette_path: Path) -> None:
+    from rerunner.async_transport import AsyncCassetteTransport
+    from rerunner.integrations.google import wrap_google_genai
+    from rerunner.transport import CassetteTransport
+
+    class AsyncSubClient:
+        def __init__(self) -> None:
+            self._client = httpx.AsyncClient()
+
+    class DualClient:
+        def __init__(self) -> None:
+            self._client = httpx.Client()
+            self.aio = AsyncSubClient()
+            self._async_httpx_client = httpx.AsyncClient()
+
+    client = DualClient()
+    wrapped = wrap_google_genai(client, temp_cassette_path, mode="replay")
+
+    assert isinstance(wrapped._client._transport, CassetteTransport)
+    assert isinstance(wrapped.aio._client._transport, AsyncCassetteTransport)
+    assert isinstance(wrapped._async_httpx_client._transport, AsyncCassetteTransport)
+
+    # Direct AsyncClient
+    direct_async = httpx.AsyncClient()
+    wrapped_direct = wrap_google_genai(direct_async, temp_cassette_path, mode="replay")
+    assert isinstance(wrapped_direct._transport, AsyncCassetteTransport)
+
+
+def test_callback_handlers_context_manager_and_cleanup(temp_cassette_path: Path) -> None:
+    from rerunner.integrations.llamaindex import LlamaIndexRerunnerHandler
+    from rerunner.side_effects import get_active_cassette
+
+    assert get_active_cassette() is None
+
+    # LangChain context manager cleanup
+    with RerunnerCallbackHandler(str(temp_cassette_path), mode="record") as handler:
+        assert get_active_cassette() is not None
+        handler.on_llm_start({}, ["prompt"])
+        assert handler.step_count == 1
+
+    assert get_active_cassette() is None
+
+    # LlamaIndex context manager cleanup
+    with LlamaIndexRerunnerHandler(str(temp_cassette_path), mode="record") as llama_h:
+        assert get_active_cassette() is not None
+        llama_h.on_event_start("llm")
+        assert llama_h.event_count == 1
+
+    assert get_active_cassette() is None

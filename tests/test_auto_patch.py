@@ -75,3 +75,27 @@ def test_unpatched_client_preserves_live_outbound(tmp_path: Path) -> None:
         unpatched = session.unpatched_client()
         # Verify it has standard unpatched transport, not CassetteTransport
         assert not isinstance(unpatched._transport, rerunner.CassetteTransport)
+
+
+def test_nested_sessions_auto_patch_restores_outer(tmp_path: Path) -> None:
+    cass_a = tmp_path / "outer.zst"
+    cass_b = tmp_path / "inner.zst"
+    mock_real = httpx.MockTransport(_mock_server)
+
+    with Session(cass_a, mode="record", auto_patch=True) as session_a:
+        session_a.transport.real_transport = mock_real
+        client_a = httpx.Client()
+        assert client_a._transport is session_a.transport
+
+        with Session(cass_b, mode="record", auto_patch=True) as session_b:
+            session_b.transport.real_transport = mock_real
+            client_b = httpx.Client()
+            assert client_b._transport is session_b.transport
+
+        # After inner exits, outer auto_patch remains active!
+        client_a_after = httpx.Client()
+        assert client_a_after._transport is session_a.transport
+
+    # After outer exits, auto_patch is completely restored
+    client_outside = httpx.Client()
+    assert not isinstance(client_outside._transport, rerunner.CassetteTransport)

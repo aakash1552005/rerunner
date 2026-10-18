@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-from rerunner.side_effects import set_active_cassette
+import contextvars
+from typing import TYPE_CHECKING, Any
+
+from rerunner.side_effects import reset_active_cassette, set_active_cassette
+
+if TYPE_CHECKING:
+    from rerunner.cassette import Cassette
 
 try:
     from llama_index.core.callbacks.base_handler import BaseCallbackHandler
@@ -38,7 +43,21 @@ class LlamaIndexRerunnerHandler(BaseCallbackHandler):  # type: ignore[misc]
         self.mode = mode
         self.fork_step = fork_step
         self.event_count = 0
-        set_active_cassette(cassette_path, mode=mode, fork_step=fork_step)
+        self._token: contextvars.Token[Cassette | None] | None = set_active_cassette(
+            cassette_path, mode=mode, fork_step=fork_step
+        )
+
+    def __enter__(self) -> LlamaIndexRerunnerHandler:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Reset the active cassette ContextVar token to avoid leaking state across tests."""
+        if hasattr(self, "_token") and self._token is not None:
+            reset_active_cassette(self._token)
+            self._token = None
 
     def on_event_start(
         self,

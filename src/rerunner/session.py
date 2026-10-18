@@ -166,7 +166,9 @@ class Session:
             reset_active_session(self._patch_token)
             self._patch_token = None
 
-        if self.effective_mode in ("record", "fork"):
+        if self.effective_mode in ("record", "fork") and (
+            self.cassette.entries or not self.cassette_path.exists()
+        ):
             self.cassette.save()
 
         if self._cassette_token is not None:

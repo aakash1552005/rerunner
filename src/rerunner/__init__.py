@@ -12,9 +12,11 @@ from rerunner.otel import (
 from rerunner.sanitizer import (
     SECRET_PATTERNS,
     SENSITIVE_HEADERS,
+    SENSITIVE_QUERY_PARAMS,
     sanitize_headers,
     sanitize_payload,
     sanitize_string,
+    sanitize_url,
 )
 from rerunner.session import (
     CassetteMissingError,
@@ -40,6 +42,7 @@ from rerunner._version import __version__
 __all__ = [
     "SECRET_PATTERNS",
     "SENSITIVE_HEADERS",
+    "SENSITIVE_QUERY_PARAMS",
     "AsyncCassetteTransport",
     "BaseStorageBackend",
     "Cassette",
@@ -65,5 +68,6 @@ __all__ = [
     "sanitize_headers",
     "sanitize_payload",
     "sanitize_string",
+    "sanitize_url",
     "side_effect",
 ]

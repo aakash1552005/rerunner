@@ -37,3 +37,18 @@ def test_json_body_canonicalization() -> None:
     key1 = compute_request_key("POST", "https://api.anthropic.com/v1/messages", body1)
     key2 = compute_request_key("POST", "https://api.anthropic.com/v1/messages", body2)
     assert key1 == key2
+
+
+def test_sensitive_query_params_normalized_for_matching() -> None:
+    url_recorded = (
+        "https://generativelanguage.googleapis.com/v1beta/models?key=[REDACTED]&model=gemini-1.5"
+    )
+    url_incoming_1 = "https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyNewKey123&model=gemini-1.5"
+    url_incoming_2 = "https://generativelanguage.googleapis.com/v1beta/models?model=gemini-1.5&key=AIzaSyDifferentKey456"
+
+    key_recorded = compute_request_key("GET", url_recorded)
+    key_incoming_1 = compute_request_key("GET", url_incoming_1)
+    key_incoming_2 = compute_request_key("GET", url_incoming_2)
+
+    assert key_recorded == key_incoming_1
+    assert key_incoming_1 == key_incoming_2

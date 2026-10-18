@@ -195,3 +195,35 @@ def test_streaming_drop_mid_stream_partial_flag(tmp_path: Path) -> None:
 
     assert len(transport_partial.cassette.entries) == 1
     assert len(transport_partial.cassette.entries[0].response.chunks) == 1  # type: ignore[union-attr]
+
+
+def test_early_break_does_not_record_truncated_stream(tmp_path: Path) -> None:
+    cassette_file = tmp_path / "early_break.jsonl"
+
+    class MultiChunkStream(httpx.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            for i in range(5):
+                yield f"data: chunk_{i}\n\n".encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=MultiChunkStream(),
+        )
+
+    transport = CassetteTransport(
+        cassette_file,
+        mode="record",
+        real_transport=httpx.MockTransport(handler),
+        record_partial_streams=False,
+    )
+    client = httpx.Client(transport=transport)
+
+    with client.stream("GET", "https://api.example.com/multi") as resp:
+        for _ in resp.iter_bytes():
+            # Break out after first chunk
+            break
+
+    # Truncated response should not be recorded as a valid entry
+    assert len(transport.cassette.entries) == 0

@@ -95,3 +95,70 @@ def test_unrecorded_tool_fails_closed_in_replay(tmp_path: Path) -> None:
         pytest.raises(SideEffectError, match="No recorded tool execution found"),
     ):
         unrecorded_tool()
+
+
+def test_record_tool_rehydrates_pydantic_model(tmp_path: Path) -> None:
+    from pydantic import BaseModel
+
+    class UserProfile(BaseModel):
+        user_id: str
+        display_name: str
+        login_count: int
+
+    cassette_file = tmp_path / "pydantic_tool.jsonl"
+    calls = 0
+
+    @record_tool(name="fetch_user_profile")
+    def fetch_user_profile(user_id: str) -> UserProfile:
+        nonlocal calls
+        calls += 1
+        return UserProfile(user_id=user_id, display_name="Test User", login_count=42)
+
+    with Session(cassette_file, mode="record"):
+        res = fetch_user_profile("usr_123")
+        assert isinstance(res, UserProfile)
+        assert res.user_id == "usr_123"
+        assert res.login_count == 42
+        assert calls == 1
+
+    with Session(cassette_file, mode="replay"):
+        res_replay = fetch_user_profile("usr_123")
+        assert isinstance(res_replay, UserProfile)
+        assert res_replay.user_id == "usr_123"
+        assert res_replay.display_name == "Test User"
+        assert res_replay.login_count == 42
+        assert calls == 1
+
+
+def test_record_tool_rehydrates_dataclass(tmp_path: Path) -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class InventoryItem:
+        sku: str
+        stock: int
+        price: float
+
+    cassette_file = tmp_path / "dataclass_tool.jsonl"
+    calls = 0
+
+    @record_tool(name="lookup_inventory")
+    def lookup_inventory(sku: str) -> InventoryItem:
+        nonlocal calls
+        calls += 1
+        return InventoryItem(sku=sku, stock=150, price=29.99)
+
+    with Session(cassette_file, mode="record"):
+        res = lookup_inventory("SKU-99")
+        assert isinstance(res, InventoryItem)
+        assert res.stock == 150
+        assert res.price == 29.99
+        assert calls == 1
+
+    with Session(cassette_file, mode="replay"):
+        res_replay = lookup_inventory("SKU-99")
+        assert isinstance(res_replay, InventoryItem)
+        assert res_replay.sku == "SKU-99"
+        assert res_replay.stock == 150
+        assert res_replay.price == 29.99
+        assert calls == 1

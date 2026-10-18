@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-from rerunner.side_effects import set_active_cassette
+import contextvars
+from typing import TYPE_CHECKING, Any
+from rerunner.side_effects import reset_active_cassette, set_active_cassette
+
+if TYPE_CHECKING:
+    from rerunner.cassette import Cassette
 
 try:
     from langchain_core.callbacks.base import BaseCallbackHandler
@@ -32,14 +36,21 @@ class RerunnerCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
         self.mode = mode
         self.fork_step = fork_step
         self.step_count = 0
-        self.ignore_llm = False
-        self.ignore_chain = False
-        self.ignore_agent = False
-        self.ignore_chat_model = False
-        self.ignore_retriever = False
-        self.ignore_custom_event = False
-        self.raise_error = False
-        set_active_cassette(cassette_path, mode=mode, fork_step=fork_step)
+        self._token: contextvars.Token[Cassette | None] | None = set_active_cassette(
+            cassette_path, mode=mode, fork_step=fork_step
+        )
+
+    def __enter__(self) -> RerunnerCallbackHandler:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Reset the active cassette ContextVar token to avoid leaking state across tests."""
+        if hasattr(self, "_token") and self._token is not None:
+            reset_active_cassette(self._token)
+            self._token = None
 
     def on_llm_start(self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any) -> None:
         """Invoked when an LLM call begins in a LangChain chain."""
