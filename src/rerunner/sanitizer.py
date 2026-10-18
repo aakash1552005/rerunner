@@ -239,7 +239,7 @@ def sanitize_body(
             parsed = json.loads(trimmed)
             sanitized_data = sanitize_payload(parsed, custom_patterns=custom_patterns)
             return json.dumps(sanitized_data, ensure_ascii=False)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
     return sanitize_string(body, custom_patterns=custom_patterns)

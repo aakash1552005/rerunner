@@ -30,7 +30,7 @@ def _extract_tokens_from_body(body_str: str) -> int | None:
                 comp = usage.get("completion_tokens") or usage.get("output_tokens") or 0
                 if prompt or comp:
                     return int(prompt) + int(comp)
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError, KeyError):
         pass
     return None
 

@@ -5,11 +5,14 @@ Supports local filesystem, AWS S3 (`s3://`), and Google Cloud Storage (`gs://`).
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
+import contextlib
+import os
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
+import uuid
 
 if TYPE_CHECKING:
     pass
@@ -86,9 +89,16 @@ class LocalStorageBackend(BaseStorageBackend):
     def write_bytes(self, uri: str, data: bytes) -> None:
         path = self._to_path(uri)
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(f"{path.suffix}.tmp")
-        temp_path.write_bytes(data)
-        temp_path.replace(path)
+        unique_suffix = f"{path.suffix}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp"
+        temp_path = path.with_suffix(unique_suffix)
+        try:
+            temp_path.write_bytes(data)
+            temp_path.replace(path)
+        except BaseException:
+            if temp_path.exists():
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
+            raise
 
     def exists(self, uri: str) -> bool:
         return self._to_path(uri).exists()
