@@ -28,7 +28,9 @@ def test_volatile_headers_stripped() -> None:
 
 
 def test_json_body_canonicalization() -> None:
-    body1 = '{"model": "claude-3-5-sonnet-20241022", "messages": [{"role": "user", "content": "hi"}]}'
+    body1 = (
+        '{"model": "claude-3-5-sonnet-20241022", "messages": [{"role": "user", "content": "hi"}]}'
+    )
     body2 = '{\n  "messages": [\n    {"role": "user", "content": "hi"}\n  ],\n  "model": "claude-3-5-sonnet-20241022"\n}'
 
     assert normalize_body(body1) == normalize_body(body2)

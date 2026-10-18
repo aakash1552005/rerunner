@@ -33,6 +33,7 @@ Set the recording mode to `record` when running tests locally or against real st
 import pytest
 from rerunner import Cassette
 
+
 def test_openai_agent_completion():
     cassette = Cassette("cassettes/openai_agent.jsonl", mode="record")
     with cassette:
@@ -63,6 +64,7 @@ def test_openai_agent_offline():
 ```python
 from rerunner import Cassette
 
+
 def test_streaming_agent():
     cassette = Cassette("cassettes/streaming_agent.jsonl", mode="replay")
     with cassette:
@@ -84,7 +86,7 @@ from rerunner.sanitizer import sanitize_data
 raw_payload = {
     "api_key": "sk-proj-abc1234567890",
     "user_email": "john.doe@example.com",
-    "credit_card": "4532-1234-5678-9012"
+    "credit_card": "4532-1234-5678-9012",
 }
 
 clean_payload = sanitize_data(raw_payload)

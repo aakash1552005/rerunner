@@ -40,7 +40,10 @@ def generate_synthetic_agent_cassette(num_turns: int = 100) -> list[CassetteEntr
                 request=RecordedRequest(
                     method="POST",
                     url="https://api.openai.com/v1/chat/completions",
-                    headers={"authorization": "Bearer sk-test-key", "content-type": "application/json"},
+                    headers={
+                        "authorization": "Bearer sk-test-key",
+                        "content-type": "application/json",
+                    },
                     body=prompt,
                 ),
                 response=RecordedResponse(
@@ -92,6 +95,7 @@ def run_benchmark() -> None:
     has_zstd = False
     try:
         import zstandard  # noqa: F401
+
         has_zstd = True
         results.append(benchmark_format("cassette.jsonl.zst", entries))
     except ImportError:
@@ -100,7 +104,11 @@ def run_benchmark() -> None:
     baseline_size = results[0]["size_kb"]
     assert isinstance(baseline_size, float)
 
-    table = Table(title="Cassette Compression & Throughput Performance", show_header=True, header_style="bold magenta")
+    table = Table(
+        title="Cassette Compression & Throughput Performance",
+        show_header=True,
+        header_style="bold magenta",
+    )
     table.add_column("Format", style="cyan", width=16)
     table.add_column("Size (KB)", justify="right", width=12)
     table.add_column("Compression", justify="right", width=14)
@@ -121,7 +129,9 @@ def run_benchmark() -> None:
 
     console.print(table)
     if not has_zstd:
-        console.print("[yellow]Note: Install `pip install zstandard` to benchmark Zstandard format.[/]\n")
+        console.print(
+            "[yellow]Note: Install `pip install zstandard` to benchmark Zstandard format.[/]\n"
+        )
 
 
 if __name__ == "__main__":

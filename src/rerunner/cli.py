@@ -145,17 +145,23 @@ def verify(
         for leak in all_leaks:
             console.print(f"  [red]• {leak}[/]")
         if strict_security:
-            console.print("[bold red]Failing verification due to detected unredacted sensitive data.[/]")
+            console.print(
+                "[bold red]Failing verification due to detected unredacted sensitive data.[/]"
+            )
             sys.exit(1)
     else:
-        console.print("[bold green]✔ Security scan passed: Zero leaked API keys or PII detected.[/]")
+        console.print(
+            "[bold green]✔ Security scan passed: Zero leaked API keys or PII detected.[/]"
+        )
 
     # 3. Calculate and display savings summary
     est_tokens = max(0, total_chars // 4)
     est_dollars_saved = (est_tokens / 1_000_000) * 10.0
     est_duration_saved = http_steps * 1.8
 
-    summary_table = Table(title="Cassette Verification & Savings Summary", show_header=True, header_style="bold green")
+    summary_table = Table(
+        title="Cassette Verification & Savings Summary", show_header=True, header_style="bold green"
+    )
     summary_table.add_column("Property", style="cyan")
     summary_table.add_column("Value", style="bold yellow")
     summary_table.add_row("Cassette File", cassette_path.name)
@@ -328,4 +334,3 @@ def export_otel(
 
 if __name__ == "__main__":
     app()
-

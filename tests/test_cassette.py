@@ -192,7 +192,7 @@ def test_cassette_zstd_missing_dependency_raises_error(
     def fake_import(name: str, *args: object, **kwargs: object) -> object:
         if name == "zstandard":
             raise ImportError("No module named 'zstandard'")
-        return real_import(name, *args, **kwargs)
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
@@ -205,4 +205,3 @@ def test_cassette_zstd_missing_dependency_raises_error(
     dummy_zst.write_bytes(b"dummy")
     with pytest.raises(CassetteError, match="zstandard is required"):
         Cassette.load(dummy_zst)
-

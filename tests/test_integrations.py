@@ -54,4 +54,3 @@ def test_langchain_callback_handler(temp_cassette_path: Path) -> None:
     handler.on_llm_start({}, ["Write code"])
     handler.on_tool_start({}, "Search web")
     assert handler.step_count == 2
-

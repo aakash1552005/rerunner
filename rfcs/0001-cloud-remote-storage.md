@@ -48,6 +48,7 @@ All storage backends must implement the `BaseStorageDriver` protocol:
 ```python
 from typing import Protocol, runtime_checkable
 
+
 @runtime_checkable
 class BaseStorageDriver(Protocol):
     """Protocol for pluggable cassette persistence drivers."""

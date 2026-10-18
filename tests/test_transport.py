@@ -34,7 +34,9 @@ def test_sync_record_and_replay(temp_cassette_path: Path, mock_transport: Any) -
         real_transport=mock_transport,
     )
     with httpx.Client(transport=replay_transport) as client:
-        replayed_resp = client.post("https://api.openai.com/v1/chat/completions", json={"prompt": "test"})
+        replayed_resp = client.post(
+            "https://api.openai.com/v1/chat/completions", json={"prompt": "test"}
+        )
         assert replayed_resp.status_code == 200
         assert "Hello AI World" in replayed_resp.text
         # Call count remains 1, proving network was NOT hit
@@ -50,7 +52,9 @@ async def test_async_record_and_replay(temp_cassette_path: Path, mock_async_tran
         real_transport=mock_async_transport,
     )
     async with httpx.AsyncClient(transport=async_record_transport) as client:
-        resp = await client.post("https://api.anthropic.com/v1/messages", json={"prompt": "async test"})
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages", json={"prompt": "async test"}
+        )
         assert resp.status_code == 200
         assert "Async Hello" in resp.text
         assert mock_async_transport.call_count == 1
@@ -62,7 +66,9 @@ async def test_async_record_and_replay(temp_cassette_path: Path, mock_async_tran
         real_transport=mock_async_transport,
     )
     async with httpx.AsyncClient(transport=async_replay_transport) as client:
-        replayed_resp = await client.post("https://api.anthropic.com/v1/messages", json={"prompt": "async test"})
+        replayed_resp = await client.post(
+            "https://api.anthropic.com/v1/messages", json={"prompt": "async test"}
+        )
         assert replayed_resp.status_code == 200
         assert "Async Hello" in replayed_resp.text
         assert mock_async_transport.call_count == 1

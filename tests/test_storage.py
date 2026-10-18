@@ -53,7 +53,9 @@ def test_s3_storage_backend_mocked() -> None:
 
     # Test write
     backend.write_bytes(uri, b"new_bytes")
-    mock_s3.put_object.assert_called_once_with(Bucket="ci-cassettes", Key="agent-run-1.jsonl", Body=b"new_bytes")
+    mock_s3.put_object.assert_called_once_with(
+        Bucket="ci-cassettes", Key="agent-run-1.jsonl", Body=b"new_bytes"
+    )
 
     # Test exists
     assert backend.exists(uri) is True

@@ -235,7 +235,9 @@ def test_hmac_cryptographic_integrity_verification(tmp_path: Path) -> None:
     entry1 = CassetteEntry(
         step=1,
         entry_type="http",
-        request=RecordedRequest(method="GET", url="https://example.com", headers={}, body="", request_key="key1"),
+        request=RecordedRequest(
+            method="GET", url="https://example.com", headers={}, body="", request_key="key1"
+        ),
         response=RecordedResponse(status_code=200, headers={}, body="OK"),
     )
     entry1.prev_hash = "GENESIS"
@@ -258,15 +260,19 @@ def test_async_client_wrappers_attach_async_transports(tmp_path: Path) -> None:
     class DummyAsyncClient:
         def __init__(self) -> None:
             self._client = httpx.AsyncClient()
-            self._client._mounts = {"https://": httpx.AsyncHTTPTransport()}
+            self._client._mounts = {"https://": httpx.AsyncHTTPTransport()}  # type: ignore[dict-item]
 
     async_client = DummyAsyncClient()
     wrapped_openai = wrap_openai(async_client, tmp_path / "async_openai.jsonl", mode="record")
     assert isinstance(wrapped_openai._client._transport, AsyncCassetteTransport)
-    assert len(wrapped_openai._client._mounts) == 0, "Proxy mounts must be cleared to prevent bypass"
+    assert len(wrapped_openai._client._mounts) == 0, (
+        "Proxy mounts must be cleared to prevent bypass"
+    )
 
     anthropic_async = DummyAsyncClient()
-    wrapped_anthropic = wrap_anthropic(anthropic_async, tmp_path / "async_anthropic.jsonl", mode="record")
+    wrapped_anthropic = wrap_anthropic(
+        anthropic_async, tmp_path / "async_anthropic.jsonl", mode="record"
+    )
     assert isinstance(wrapped_anthropic._client._transport, AsyncCassetteTransport)
     assert len(wrapped_anthropic._client._mounts) == 0
 

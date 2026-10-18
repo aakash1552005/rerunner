@@ -64,9 +64,15 @@ def export_to_otlp(
         "startTimeUnixNano": str(base_time_ns),
         "endTimeUnixNano": str(base_time_ns + session_duration_ns),
         "attributes": [
-            {"key": "rerunner.format_version", "value": {"stringValue": cassette.metadata.format_version}},
+            {
+                "key": "rerunner.format_version",
+                "value": {"stringValue": cassette.metadata.format_version},
+            },
             {"key": "rerunner.total_steps", "value": {"intValue": len(cassette.entries)}},
-            {"key": "rerunner.hash_algorithm", "value": {"stringValue": cassette.metadata.hash_algorithm}},
+            {
+                "key": "rerunner.hash_algorithm",
+                "value": {"stringValue": cassette.metadata.hash_algorithm},
+            },
         ],
         "status": {"code": 1},  # STATUS_CODE_OK
     }
@@ -83,23 +89,31 @@ def export_to_otlp(
             {"key": "rerunner.entry_type", "value": {"stringValue": entry.entry_type}},
         ]
         if entry.entry_hash:
-            span_attributes.append({"key": "rerunner.entry_hash", "value": {"stringValue": entry.entry_hash}})
+            span_attributes.append(
+                {"key": "rerunner.entry_hash", "value": {"stringValue": entry.entry_hash}}
+            )
 
         span_name: str
         if entry.entry_type == "http" and entry.request and entry.response:
             span_name = f"{entry.request.method} {entry.request.url.split('?')[0]}"
-            span_attributes.extend([
-                {"key": "http.method", "value": {"stringValue": entry.request.method}},
-                {"key": "http.url", "value": {"stringValue": entry.request.url}},
-                {"key": "http.status_code", "value": {"intValue": entry.response.status_code}},
-            ])
+            span_attributes.extend(
+                [
+                    {"key": "http.method", "value": {"stringValue": entry.request.method}},
+                    {"key": "http.url", "value": {"stringValue": entry.request.url}},
+                    {"key": "http.status_code", "value": {"intValue": entry.response.status_code}},
+                ]
+            )
             # Detect model provider
             if "api.anthropic.com" in entry.request.url:
-                span_attributes.append({"key": "gen_ai.system", "value": {"stringValue": "anthropic"}})
+                span_attributes.append(
+                    {"key": "gen_ai.system", "value": {"stringValue": "anthropic"}}
+                )
             elif "api.openai.com" in entry.request.url:
                 span_attributes.append({"key": "gen_ai.system", "value": {"stringValue": "openai"}})
             elif "googleapis.com" in entry.request.url:
-                span_attributes.append({"key": "gen_ai.system", "value": {"stringValue": "google_genai"}})
+                span_attributes.append(
+                    {"key": "gen_ai.system", "value": {"stringValue": "google_genai"}}
+                )
         elif entry.entry_type == "side_effect":
             tool_name = entry.side_effect_name or "unknown_tool"
             span_name = f"tool.execution:{tool_name}"
@@ -107,17 +121,19 @@ def export_to_otlp(
         else:
             span_name = f"agent.step:{entry.step}"
 
-        spans.append({
-            "traceId": trace_id,
-            "spanId": step_span_id,
-            "parentSpanId": root_span_id,
-            "name": span_name,
-            "kind": 3 if entry.entry_type == "http" else 1,  # SPAN_KIND_CLIENT or INTERNAL
-            "startTimeUnixNano": str(current_time_ns),
-            "endTimeUnixNano": str(current_time_ns + step_duration_ns),
-            "attributes": span_attributes,
-            "status": {"code": 1},
-        })
+        spans.append(
+            {
+                "traceId": trace_id,
+                "spanId": step_span_id,
+                "parentSpanId": root_span_id,
+                "name": span_name,
+                "kind": 3 if entry.entry_type == "http" else 1,  # SPAN_KIND_CLIENT or INTERNAL
+                "startTimeUnixNano": str(current_time_ns),
+                "endTimeUnixNano": str(current_time_ns + step_duration_ns),
+                "attributes": span_attributes,
+                "status": {"code": 1},
+            }
+        )
 
         current_time_ns += step_duration_ns + 10_000_000
 
@@ -161,7 +177,9 @@ def compute_cassette_metrics(cassette: Cassette) -> dict[str, Any]:
             if entry.request:
                 url = entry.request.url
                 if "anthropic" in url:
-                    provider_distribution["anthropic"] = provider_distribution.get("anthropic", 0) + 1
+                    provider_distribution["anthropic"] = (
+                        provider_distribution.get("anthropic", 0) + 1
+                    )
                 elif "openai" in url:
                     provider_distribution["openai"] = provider_distribution.get("openai", 0) + 1
                 elif "googleapis" in url:

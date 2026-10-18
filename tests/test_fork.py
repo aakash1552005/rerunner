@@ -10,11 +10,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_fork_replays_past_and_executes_new_live(temp_cassette_path: Path, mock_transport: Any) -> None:
+def test_fork_replays_past_and_executes_new_live(
+    temp_cassette_path: Path, mock_transport: Any
+) -> None:
     mock = mock_transport
 
     # Step 1 & 2 recorded initially
-    transport_rec = CassetteTransport(cassette_path=temp_cassette_path, mode="record", real_transport=mock)
+    transport_rec = CassetteTransport(
+        cassette_path=temp_cassette_path, mode="record", real_transport=mock
+    )
     with httpx.Client(transport=transport_rec) as client:
         client.post("https://api.openai.com/v1/chat/completions", json={"step": 1})
         client.post("https://api.openai.com/v1/chat/completions", json={"step": 2})
@@ -34,5 +38,7 @@ def test_fork_replays_past_and_executes_new_live(temp_cassette_path: Path, mock_
         assert mock.call_count == 2
 
         # Step 2: Live execution because step > fork_step
-        client.post("https://api.openai.com/v1/chat/completions", json={"step": 2, "new_prompt": "updated"})
+        client.post(
+            "https://api.openai.com/v1/chat/completions", json={"step": 2, "new_prompt": "updated"}
+        )
         assert mock.call_count == 3

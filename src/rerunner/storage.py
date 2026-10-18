@@ -84,6 +84,7 @@ class S3StorageBackend(BaseStorageBackend):
         if self._client is None:
             try:
                 import boto3  # type: ignore[import-untyped]
+
                 self._client = boto3.client("s3")
             except ImportError as err:
                 raise StorageBackendError(
@@ -107,7 +108,9 @@ class S3StorageBackend(BaseStorageBackend):
             response = client.get_object(Bucket=bucket, Key=key)
             return response["Body"].read()  # type: ignore[no-any-return]
         except Exception as exc:
-            raise StorageBackendError(f"Failed to read cassette from S3 URI '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Failed to read cassette from S3 URI '{uri}': {exc}"
+            ) from exc
 
     def write_bytes(self, uri: str, data: bytes) -> None:
         bucket, key = self._parse_s3_uri(uri)
@@ -132,7 +135,9 @@ class S3StorageBackend(BaseStorageBackend):
             err_str = str(exc).lower()
             if "404" in err_str or "not found" in err_str or "nosuchkey" in err_str:
                 return False
-            raise StorageBackendError(f"Error checking existence of S3 cassette '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Error checking existence of S3 cassette '{uri}': {exc}"
+            ) from exc
 
     def delete(self, uri: str) -> None:
         bucket, key = self._parse_s3_uri(uri)
@@ -140,7 +145,9 @@ class S3StorageBackend(BaseStorageBackend):
         try:
             client.delete_object(Bucket=bucket, Key=key)
         except Exception as exc:
-            raise StorageBackendError(f"Failed to delete cassette at S3 URI '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Failed to delete cassette at S3 URI '{uri}': {exc}"
+            ) from exc
 
 
 class GCSStorageBackend(BaseStorageBackend):
@@ -153,6 +160,7 @@ class GCSStorageBackend(BaseStorageBackend):
         if self._client is None:
             try:
                 from google.cloud import storage  # type: ignore[import-untyped]
+
                 self._client = storage.Client()
             except ImportError as err:
                 raise StorageBackendError(
@@ -164,7 +172,9 @@ class GCSStorageBackend(BaseStorageBackend):
     def _parse_gcs_uri(self, uri: str) -> tuple[str, str]:
         parsed = urlparse(uri)
         if parsed.scheme != "gs" or not parsed.netloc:
-            raise StorageBackendError(f"Invalid GCS URI format: '{uri}'. Expected 'gs://bucket/blob_name'")
+            raise StorageBackendError(
+                f"Invalid GCS URI format: '{uri}'. Expected 'gs://bucket/blob_name'"
+            )
         bucket = parsed.netloc
         blob_name = parsed.path.lstrip("/")
         return bucket, blob_name
@@ -177,7 +187,9 @@ class GCSStorageBackend(BaseStorageBackend):
             blob = bucket.blob(blob_name)
             return blob.download_as_bytes()  # type: ignore[no-any-return]
         except Exception as exc:
-            raise StorageBackendError(f"Failed to read cassette from GCS URI '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Failed to read cassette from GCS URI '{uri}': {exc}"
+            ) from exc
 
     def write_bytes(self, uri: str, data: bytes) -> None:
         bucket_name, blob_name = self._parse_gcs_uri(uri)
@@ -187,7 +199,9 @@ class GCSStorageBackend(BaseStorageBackend):
             blob = bucket.blob(blob_name)
             blob.upload_from_string(data)
         except Exception as exc:
-            raise StorageBackendError(f"Failed to write cassette to GCS URI '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Failed to write cassette to GCS URI '{uri}': {exc}"
+            ) from exc
 
     def exists(self, uri: str) -> bool:
         bucket_name, blob_name = self._parse_gcs_uri(uri)
@@ -200,7 +214,9 @@ class GCSStorageBackend(BaseStorageBackend):
             err_str = str(exc).lower()
             if "404" in err_str or "not found" in err_str:
                 return False
-            raise StorageBackendError(f"Error checking existence of GCS cassette '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Error checking existence of GCS cassette '{uri}': {exc}"
+            ) from exc
 
     def delete(self, uri: str) -> None:
         bucket_name, blob_name = self._parse_gcs_uri(uri)
@@ -210,7 +226,9 @@ class GCSStorageBackend(BaseStorageBackend):
             blob = bucket.blob(blob_name)
             blob.delete()
         except Exception as exc:
-            raise StorageBackendError(f"Failed to delete cassette at GCS URI '{uri}': {exc}") from exc
+            raise StorageBackendError(
+                f"Failed to delete cassette at GCS URI '{uri}': {exc}"
+            ) from exc
 
 
 def get_storage_backend(uri: str) -> BaseStorageBackend:

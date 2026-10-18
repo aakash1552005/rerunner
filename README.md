@@ -176,6 +176,7 @@ Use `@side_effect` to prevent destructive actions (database writes, notification
 ```python
 from rerunner import side_effect
 
+
 @side_effect(name="charge_customer")
 def charge_card(user_id: str, amount: float) -> str:
     # Runs live during recording.
@@ -194,6 +195,7 @@ Mark your tests with `@pytest.mark.rerunner`:
 import httpx
 import openai
 import pytest
+
 
 @pytest.mark.rerunner("tests/fixtures/agent_run.jsonl")
 def test_agent_decision(rerunner_transport):

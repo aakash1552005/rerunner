@@ -123,6 +123,7 @@ def test_sync_stream_records_and_replays_chunks(tmp_path: Path) -> None:
 
     assert network.call_count == 1
 
+
 def test_openai_sdk_streams_replayed_chunks_without_network(tmp_path: Path) -> None:
     """The OpenAI SDK streams replayed chunks without another network call."""
     from openai import OpenAI
@@ -169,7 +170,7 @@ def test_openai_sdk_streams_replayed_chunks_without_network(tmp_path: Path) -> N
         client = OpenAI(
             api_key="test-key",
             base_url="https://example.test/v1",
-            http_client=http_client, # type: ignore[arg-type]
+            http_client=http_client,  # type: ignore[arg-type]
         )
         stream = client.chat.completions.create(
             model="test-model",
@@ -191,7 +192,7 @@ def test_openai_sdk_streams_replayed_chunks_without_network(tmp_path: Path) -> N
         client = OpenAI(
             api_key="test-key",
             base_url="https://example.test/v1",
-            http_client=http_client, # type: ignore[arg-type]
+            http_client=http_client,  # type: ignore[arg-type]
         )
         stream = client.chat.completions.create(
             model="test-model",
@@ -202,6 +203,7 @@ def test_openai_sdk_streams_replayed_chunks_without_network(tmp_path: Path) -> N
 
     assert replayed_tokens == ["Hello", " world"]
     assert network_call_count == 1
+
 
 @pytest.mark.asyncio
 async def test_async_stream_records_and_replays_chunks(

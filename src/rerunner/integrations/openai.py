@@ -28,9 +28,8 @@ def wrap_openai(
 
         client = wrap_openai(openai.OpenAI(), "my_run.jsonl", mode="replay")
     """
-    is_async = (
-        type(client).__name__.startswith("Async")
-        or isinstance(getattr(client, "_client", None), httpx.AsyncClient)
+    is_async = type(client).__name__.startswith("Async") or isinstance(
+        getattr(client, "_client", None), httpx.AsyncClient
     )
 
     if is_async:
@@ -38,9 +37,7 @@ def wrap_openai(
             cassette_path=cassette_path, mode=mode, fork_step=fork_step
         )
     else:
-        transport = CassetteTransport(
-            cassette_path=cassette_path, mode=mode, fork_step=fork_step
-        )
+        transport = CassetteTransport(cassette_path=cassette_path, mode=mode, fork_step=fork_step)
 
     if hasattr(client, "_client"):
         http_client = client._client

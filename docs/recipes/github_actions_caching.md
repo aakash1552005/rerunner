@@ -13,8 +13,7 @@ import pytest
 
 
 @pytest.mark.rerunner("tests/fixtures/agent_run.jsonl")
-def test_agent_decision(rerunner_transport):
-    ...
+def test_agent_decision(rerunner_transport): ...
 ```
 
 Record or refresh cassettes locally when the interaction changes:

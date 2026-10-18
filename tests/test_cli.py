@@ -31,7 +31,9 @@ def test_cli_inspect_and_verify(temp_cassette_path: Path) -> None:
 
     # 4. Test export-otel command
     out_otel = temp_cassette_path.with_suffix(".otel.json")
-    result_otel = runner.invoke(app, ["export-otel", str(temp_cassette_path), "--output", str(out_otel)])
+    result_otel = runner.invoke(
+        app, ["export-otel", str(temp_cassette_path), "--output", str(out_otel)]
+    )
     assert result_otel.exit_code == 0
     assert "Successfully exported cassette to OpenTelemetry" in result_otel.output
     assert out_otel.exists()
@@ -66,10 +68,12 @@ def test_cli_verify_detects_leaked_secret(tmp_path: Path) -> None:
     result = runner.invoke(app, ["verify", str(leaky_cassette), "--strict"])
     assert result.exit_code == 1
     assert "SECURITY WARNING" in result.output
-    assert "Found unredacted pattern" in result.output or "Unredacted sensitive header" in result.output
+    assert (
+        "Found unredacted pattern" in result.output
+        or "Unredacted sensitive header" in result.output
+    )
 
     # Verify passes in non-strict mode with warning
     result_non_strict = runner.invoke(app, ["verify", str(leaky_cassette), "--no-strict"])
     assert result_non_strict.exit_code == 0
     assert "SECURITY WARNING" in result_non_strict.output
-

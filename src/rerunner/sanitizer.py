@@ -198,9 +198,17 @@ def sanitize_payload(
     if isinstance(data, dict):
         result: dict[Any, Any] = {}
         for k, v in data.items():
-            clean_k = sanitize_string(str(k), custom_patterns=custom_patterns) if isinstance(k, str) else k
+            clean_k = (
+                sanitize_string(str(k), custom_patterns=custom_patterns)
+                if isinstance(k, str)
+                else k
+            )
             # If the key is specifically version/semver, do not redact the value as an IP
-            if isinstance(k, str) and k.lower() in ("version", "semver", "pyversion", "sdk_version") and isinstance(v, str):
+            if (
+                isinstance(k, str)
+                and k.lower() in ("version", "semver", "pyversion", "sdk_version")
+                and isinstance(v, str)
+            ):
                 result[clean_k] = v
             else:
                 result[clean_k] = sanitize_payload(v, custom_patterns=custom_patterns)
@@ -224,7 +232,9 @@ def sanitize_body(
         return body
 
     trimmed = body.strip()
-    if (trimmed.startswith("{") and trimmed.endswith("}")) or (trimmed.startswith("[") and trimmed.endswith("]")):
+    if (trimmed.startswith("{") and trimmed.endswith("}")) or (
+        trimmed.startswith("[") and trimmed.endswith("]")
+    ):
         try:
             parsed = json.loads(trimmed)
             sanitized_data = sanitize_payload(parsed, custom_patterns=custom_patterns)
@@ -264,7 +274,9 @@ def find_sensitive_leaks(
     for text in text_to_scan:
         for match in _CARD_REGEX.finditer(text):
             matched = match.group(0)
-            if (" " in matched or "-" in matched or _is_luhn_valid(matched)) and not matched.startswith("[REDACTED"):
+            if (
+                " " in matched or "-" in matched or _is_luhn_valid(matched)
+            ) and not matched.startswith("[REDACTED"):
                 leaks.append("Found unredacted pattern matching REDACTED_CREDIT_CARD")
 
         for match in _IP_REGEX.finditer(text):

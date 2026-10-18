@@ -93,7 +93,9 @@ if __name__ == "__main__":
     print("==================================================================")
     # When an OPENAI_API_KEY is available, uses the real network; otherwise falls back to mock server
     real_transport = httpx.HTTPTransport() if os.getenv("OPENAI_API_KEY") else MockOpenAIServer()
-    record_transport = CassetteTransport(cassette_path, mode="record", real_transport=real_transport)
+    record_transport = CassetteTransport(
+        cassette_path, mode="record", real_transport=real_transport
+    )
 
     city_recorded = fetch_city_details(record_transport)
     print(f"Recorded Response: {city_recorded.name}, {city_recorded.country}")

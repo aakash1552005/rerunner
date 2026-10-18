@@ -17,4 +17,3 @@ __all__ = [
     "wrap_openai",
     "wrap_vertexai",
 ]
-

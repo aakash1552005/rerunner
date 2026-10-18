@@ -49,7 +49,10 @@ def test_export_to_otlp(temp_cassette_path: Path) -> None:
     assert len(resource_spans) == 1
 
     # Verify Resource attributes
-    res_attrs = {attr["key"]: attr["value"]["stringValue"] for attr in resource_spans[0]["resource"]["attributes"]}
+    res_attrs = {
+        attr["key"]: attr["value"]["stringValue"]
+        for attr in resource_spans[0]["resource"]["attributes"]
+    }
     assert res_attrs["service.name"] == "my-enterprise-agent"
     assert res_attrs["telemetry.sdk.name"] == "rerunner"
 
@@ -86,7 +89,9 @@ def test_compute_cassette_metrics(temp_cassette_path: Path) -> None:
         CassetteEntry(
             step=1,
             entry_type="http",
-            request=RecordedRequest(method="POST", url="https://api.anthropic.com/v1/messages", headers={}, body="{}"),
+            request=RecordedRequest(
+                method="POST", url="https://api.anthropic.com/v1/messages", headers={}, body="{}"
+            ),
             response=RecordedResponse(status_code=200, headers={}, body="{}"),
         )
     )
@@ -129,7 +134,9 @@ def test_export_cassette_to_otel_file(temp_cassette_path: Path, tmp_path: Path) 
     cassette.save()
 
     out_file = tmp_path / "trace.otel.json"
-    export_cassette_to_otel_file(temp_cassette_path, out_file, service_name="claude-agent", include_metrics=True)
+    export_cassette_to_otel_file(
+        temp_cassette_path, out_file, service_name="claude-agent", include_metrics=True
+    )
 
     assert out_file.exists()
     content = json.loads(out_file.read_text(encoding="utf-8"))

@@ -8,6 +8,7 @@ from rerunner.side_effects import set_active_cassette
 try:
     from langchain_core.callbacks.base import BaseCallbackHandler
 except ImportError:  # pragma: no cover
+
     class BaseCallbackHandler:  # type: ignore[no-redef]
         """Fallback callback handler base when langchain-core is not installed."""
 
@@ -23,7 +24,9 @@ except ImportError:  # pragma: no cover
 class RerunnerCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
     """Callback handler compatible with LangChain, LangGraph, and CrewAI pipelines."""
 
-    def __init__(self, cassette_path: str, mode: str = "replay", fork_step: int | None = None) -> None:
+    def __init__(
+        self, cassette_path: str, mode: str = "replay", fork_step: int | None = None
+    ) -> None:
         super().__init__()
         self.cassette_path = cassette_path
         self.mode = mode
