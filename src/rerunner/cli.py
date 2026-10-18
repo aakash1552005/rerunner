@@ -2,15 +2,78 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from typing import Any
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rerunner.cassette import Cassette
 from rerunner.integrity import verify_cassette_integrity
+from rerunner.models import CassetteEntry
 from rerunner.sanitizer import find_sensitive_leaks
+
+
+def _extract_tokens_from_body(body_str: str) -> int | None:
+    if not body_str:
+        return None
+    try:
+        data = json.loads(body_str)
+        if isinstance(data, dict):
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                if "total_tokens" in usage and isinstance(usage["total_tokens"], int):
+                    return usage["total_tokens"]
+                prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+                comp = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+                if prompt or comp:
+                    return int(prompt) + int(comp)
+    except Exception:
+        pass
+    return None
+
+
+def _extract_entry_info(entry: CassetteEntry) -> dict[str, Any]:
+    step = entry.step
+    if entry.entry_type == "http" and entry.request and entry.response:
+        entry_type = "HTTP"
+        target = f"{entry.request.method} {entry.request.url}"
+        status = str(entry.response.status_code)
+        streaming = "Yes" if entry.response.is_streaming else "No"
+        tokens = _extract_tokens_from_body(entry.response.body)
+        latency = (
+            f"{sum(entry.response.chunk_delays_ms):.1f}ms"
+            if entry.response.chunk_delays_ms and sum(entry.response.chunk_delays_ms) > 0
+            else "-"
+        )
+    elif entry.entry_type in ("side_effect", "tool"):
+        entry_type = "Tool"
+        target = f"{entry.side_effect_name or 'tool'}(...)"
+        status = "Error" if entry.side_effect_exception else "OK"
+        streaming = "-"
+        tokens = None
+        latency = "-"
+    else:
+        entry_type = "Unknown"
+        target = "Unknown payload"
+        status = "-"
+        streaming = "-"
+        tokens = None
+        latency = "-"
+
+    return {
+        "step": step,
+        "type": entry_type,
+        "target": target,
+        "status": status,
+        "streaming": streaming,
+        "tokens": tokens,
+        "latency": latency,
+        "entry": entry,
+    }
+
 
 app = typer.Typer(
     name="rerunner",
@@ -48,7 +111,9 @@ def main(
 
 @app.command()
 def inspect(
-    cassette_path: Path = typer.Argument(..., help="Path to a .jsonl or .jsonl.gz cassette file"),
+    cassette_path: Path = typer.Argument(
+        ..., help="Path to a cassette file (.zst, .gz, .jsonl, .json)"
+    ),
 ) -> None:
     """Inspect and summarize the contents of a recorded cassette."""
     try:
@@ -74,20 +139,25 @@ def inspect(
 
     table = Table(title="Recorded Execution Steps", show_header=True, header_style="bold magenta")
     table.add_column("Step", style="dim", width=6)
-    table.add_column("Type", width=12)
-    table.add_column("Details", justify="left")
-    table.add_column("Hash (SHA-256)", style="dim", width=12)
+    table.add_column("Type", width=8)
+    table.add_column("Method / URL / Function", justify="left")
+    table.add_column("Status", width=8)
+    table.add_column("Stream", width=8)
+    table.add_column("Tokens", justify="right", width=10)
+    table.add_column("Latency", justify="right", width=10)
 
     for entry in cassette.entries:
-        if entry.entry_type == "http" and entry.request and entry.response:
-            details = f"[bold]{entry.request.method}[/] {entry.request.url} -> [green]{entry.response.status_code}[/]"
-        elif entry.entry_type == "side_effect":
-            details = f"[bold cyan]Tool:[/] {entry.side_effect_name}(...)"
-        else:
-            details = "Unknown payload"
-
-        hash_short = f"{entry.entry_hash[:10]}..." if entry.entry_hash else "None"
-        table.add_row(str(entry.step), entry.entry_type, details, hash_short)
+        info = _extract_entry_info(entry)
+        tokens_str = f"{info['tokens']:,}" if info["tokens"] is not None else "-"
+        table.add_row(
+            str(info["step"]),
+            info["type"],
+            info["target"],
+            info["status"],
+            info["streaming"],
+            tokens_str,
+            info["latency"],
+        )
 
     console.print(table)
 
@@ -182,31 +252,127 @@ def verify(
 def diff(
     cassette_a: Path = typer.Argument(..., help="First cassette file"),
     cassette_b: Path = typer.Argument(..., help="Second cassette file"),
+    fail_on_drift: bool = typer.Option(
+        False,
+        "--fail-on-drift",
+        help="Exit with code 1 if structural drift is detected between the cassettes.",
+    ),
 ) -> None:
-    """Compare two cassettes and highlight divergences in prompt execution and outputs."""
+    """Compare two cassettes step-by-step and highlight drift in calls, prompts, and tokens."""
     try:
         c1 = Cassette.load(cassette_a, verify_integrity=False)
         c2 = Cassette.load(cassette_b, verify_integrity=False)
     except Exception as exc:
         console.print(f"[bold red]Error loading cassettes for comparison:[/] {exc}")
-        sys.exit(1)
+        raise typer.Exit(code=1) from exc
 
-    table = Table(title="Cassette Divergence Diff", show_header=True, header_style="bold cyan")
+    table = Table(title="Cassette Comparison Diff", show_header=True, header_style="bold cyan")
     table.add_column("Step", width=6)
+    table.add_column("Type", width=8)
     table.add_column(f"{cassette_a.name}", style="yellow")
     table.add_column(f"{cassette_b.name}", style="green")
+    table.add_column("Drift Status", width=18)
 
     max_len = max(len(c1.entries), len(c2.entries))
+    has_drift = False
+    tokens_a = 0
+    tokens_b = 0
+
+    added_steps = 0
+    removed_steps = 0
+    prompt_diffs = 0
+    status_diffs = 0
+
     for i in range(max_len):
         e1 = c1.entries[i] if i < len(c1.entries) else None
         e2 = c2.entries[i] if i < len(c2.entries) else None
 
-        desc1 = f"{e1.entry_type}: {e1.entry_hash[:8]}" if e1 else "[red]<Missing>[/]"
-        desc2 = f"{e2.entry_type}: {e2.entry_hash[:8]}" if e2 else "[red]<Missing>[/]"
+        info1 = _extract_entry_info(e1) if e1 else None
+        info2 = _extract_entry_info(e2) if e2 else None
 
-        table.add_row(str(i + 1), desc1, desc2)
+        if info1 and info1["tokens"]:
+            tokens_a += info1["tokens"]
+        if info2 and info2["tokens"]:
+            tokens_b += info2["tokens"]
+
+        step_type = info1["type"] if info1 else (info2["type"] if info2 else "Unknown")
+        target1 = f"{info1['target']} [{info1['status']}]" if info1 else "[red]<Missing>[/]"
+        target2 = f"{info2['target']} [{info2['status']}]" if info2 else "[red]<Missing>[/]"
+
+        step_drift = False
+        drift_reason = []
+
+        if e1 is None:
+            has_drift = True
+            step_drift = True
+            added_steps += 1
+            drift_reason.append("Added in B")
+        elif e2 is None:
+            has_drift = True
+            step_drift = True
+            removed_steps += 1
+            drift_reason.append("Removed from B")
+        else:
+            if info1 and info2 and info1["type"] != info2["type"]:
+                has_drift = True
+                step_drift = True
+                drift_reason.append("Type mismatch")
+            elif info1 and info2 and info1["target"] != info2["target"]:
+                has_drift = True
+                step_drift = True
+                drift_reason.append("Target modified")
+            elif info1 and info2 and info1["status"] != info2["status"]:
+                has_drift = True
+                step_drift = True
+                status_diffs += 1
+                drift_reason.append(f"Status ({info1['status']} != {info2['status']})")
+
+            # Check prompt modifications
+            if e1.entry_type == "http" and e2.entry_type == "http":
+                if e1.request and e2.request and e1.request.body != e2.request.body:
+                    has_drift = True
+                    step_drift = True
+                    prompt_diffs += 1
+                    drift_reason.append("Prompt modified")
+            elif (
+                e1.entry_type in ("side_effect", "tool")
+                and e2.entry_type in ("side_effect", "tool")
+                and (
+                    e1.side_effect_args != e2.side_effect_args
+                    or e1.side_effect_kwargs != e2.side_effect_kwargs
+                )
+            ):
+                has_drift = True
+                step_drift = True
+                prompt_diffs += 1
+                drift_reason.append("Tool args modified")
+
+        drift_badge = f"[red]{', '.join(drift_reason)}[/]" if step_drift else "[green]MATCH[/]"
+        table.add_row(str(i + 1), step_type, target1, target2, drift_badge)
 
     console.print(table)
+
+    token_delta = tokens_b - tokens_a
+    sign = "+" if token_delta > 0 else ""
+
+    summary_panel = Panel(
+        f"[bold cyan]Cassette A:[/] {cassette_a} ({len(c1.entries)} steps, {tokens_a:,} tokens)\n"
+        f"[bold cyan]Cassette B:[/] {cassette_b} ({len(c2.entries)} steps, {tokens_b:,} tokens)\n"
+        f"[bold cyan]Token Delta:[/] {sign}{token_delta:,} tokens\n"
+        f"[bold cyan]Added Steps:[/] {added_steps} | [bold cyan]Removed Steps:[/] {removed_steps}\n"
+        f"[bold cyan]Prompt Modifications:[/] {prompt_diffs} | [bold cyan]Status Diffs:[/] {status_diffs}",
+        title="[bold green]Drift & Delta Summary[/]",
+        border_style="cyan" if not has_drift else "red",
+    )
+    console.print(summary_panel)
+
+    if has_drift:
+        if fail_on_drift:
+            console.print("[bold red]❌ Structural drift detected between cassettes![/]")
+            raise typer.Exit(code=1)
+        console.print("[bold yellow]✔ Diff complete (drift detected).[/]")
+    else:
+        console.print("[bold green]✔ Cassettes are structurally identical.[/]")
 
 
 @app.command()

@@ -16,8 +16,15 @@ from rerunner.sanitizer import (
     sanitize_payload,
     sanitize_string,
 )
-from rerunner.session import fork, record, replay
-from rerunner.side_effects import side_effect
+from rerunner.session import (
+    CassetteMissingError,
+    Session,
+    SessionContext,
+    fork,
+    record,
+    replay,
+)
+from rerunner.side_effects import SideEffectError, record_tool, side_effect
 from rerunner.storage import (
     BaseStorageBackend,
     GCSStorageBackend,
@@ -37,10 +44,14 @@ __all__ = [
     "BaseStorageBackend",
     "Cassette",
     "CassetteError",
+    "CassetteMissingError",
     "CassetteTransport",
     "GCSStorageBackend",
     "LocalStorageBackend",
     "S3StorageBackend",
+    "Session",
+    "SessionContext",
+    "SideEffectError",
     "StorageBackendError",
     "compute_cassette_metrics",
     "export_cassette_to_otel_file",
@@ -48,6 +59,7 @@ __all__ = [
     "fork",
     "get_storage_backend",
     "record",
+    "record_tool",
     "replay",
     "sanitize_headers",
     "sanitize_payload",

@@ -8,11 +8,36 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     pass
+
+SUPPORTED_EXTENSIONS = (
+    ".cassette.zst",
+    ".zst",
+    ".jsonl.gz",
+    ".gz",
+    ".jsonl",
+    ".json",
+)
+
+
+def detect_compression(uri: str) -> Literal["zstd", "gzip", "none"]:
+    """Detect compression format from URI or file path."""
+    lower = uri.lower()
+    if lower.endswith(".cassette.zst") or lower.endswith(".zst"):
+        return "zstd"
+    if lower.endswith(".jsonl.gz") or lower.endswith(".gz"):
+        return "gzip"
+    return "none"
+
+
+def is_supported_cassette_extension(uri: str) -> bool:
+    """Return whether the URI has a supported cassette file extension."""
+    lower = uri.lower()
+    return any(lower.endswith(ext) for ext in SUPPORTED_EXTENSIONS)
 
 
 class StorageBackendError(Exception):

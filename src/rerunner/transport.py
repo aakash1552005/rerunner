@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from time import sleep
+import threading
+import time
 from typing import Literal
+
 
 import httpx
 
 from rerunner.cassette import Cassette, CassetteError
 from rerunner.matcher import (
+    MatchingStrategy,
     compute_request_key,
     normalize_body,
     normalize_headers,
@@ -29,15 +32,142 @@ def _is_event_stream(headers: httpx.Headers) -> bool:
 class _ReplayByteStream(httpx.SyncByteStream):
     """Replay recorded response chunks through HTTPX's synchronous stream API."""
 
-    def __init__(self, chunks: list[bytes], chunk_delay_ms: int = 0) -> None:
+    def __init__(
+        self,
+        chunks: list[bytes],
+        chunk_delay_ms: int = 0,
+        chunk_delays_ms: list[float] | None = None,
+    ) -> None:
         self.chunks = chunks
-        self.chunk_delay_seconds = chunk_delay_ms / 1000
+        self.chunk_delay_seconds = chunk_delay_ms / 1000 if chunk_delay_ms > 0 else 0.0
+        self.chunk_delays_ms = chunk_delays_ms or []
 
     def __iter__(self) -> Iterator[bytes]:
         for index, chunk in enumerate(self.chunks):
-            if index > 0 and self.chunk_delay_seconds:
-                sleep(self.chunk_delay_seconds)
+            if index > 0:
+                if self.chunk_delay_seconds > 0:
+                    time.sleep(self.chunk_delay_seconds)
+                elif index < len(self.chunk_delays_ms) and self.chunk_delays_ms[index] > 0:
+                    time.sleep(self.chunk_delays_ms[index] / 1000.0)
             yield chunk
+
+
+class _RecordingSyncByteStream(httpx.SyncByteStream):
+    """Pass-through recording byte stream that yields chunks lazily as consumed,
+
+    records per-chunk arrival delays, and persists to the active Cassette upon clean close().
+    """
+
+    def __init__(
+        self,
+        real_response: httpx.Response,
+        request: httpx.Request,
+        step: int,
+        cassette: Cassette,
+        request_key: str,
+        body_bytes: bytes,
+        record_partial_streams: bool = False,
+    ) -> None:
+        self.real_response = real_response
+        self.request = request
+        self.step = step
+        self.cassette = cassette
+        self.request_key = request_key
+        self.body_bytes = body_bytes
+        self.record_partial_streams = record_partial_streams
+        self.chunks: list[bytes] = []
+        self.chunk_delays_ms: list[float] = []
+        self._last_chunk_time: float | None = None
+        self._had_exception = False
+        self._completed_cleanly = False
+        self._finalized = False
+
+    def __iter__(self) -> Iterator[bytes]:
+        self._last_chunk_time = time.perf_counter()
+        try:
+            for chunk in self.real_response.iter_raw():
+                now = time.perf_counter()
+                delay_ms = (
+                    (now - self._last_chunk_time) * 1000.0
+                    if self._last_chunk_time is not None
+                    else 0.0
+                )
+                self._last_chunk_time = now
+                self.chunks.append(chunk)
+                self.chunk_delays_ms.append(round(delay_ms, 2))
+                yield chunk
+            self._completed_cleanly = True
+        except Exception:
+            self._had_exception = True
+            raise
+        finally:
+            if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
+                self._completed_cleanly = True
+                self._finalize()
+
+    def close(self) -> None:
+        try:
+            self.real_response.close()
+        finally:
+            if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
+                self._completed_cleanly = True
+            self._finalize()
+
+    def __del__(self) -> None:
+        if not self._had_exception and (self._completed_cleanly or len(self.chunks) > 0):
+            self._completed_cleanly = True
+        self._finalize()
+
+    def _finalize(self) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
+
+        if not self._completed_cleanly and not self.record_partial_streams:
+            return
+
+        response_bytes = b"".join(self.chunks)
+        cleaned_headers = sanitize_headers(normalize_headers(dict(self.request.headers)))
+        cleaned_url = sanitize_url(str(self.request.url))
+        cleaned_req_body = sanitize_body(normalize_body(self.body_bytes))
+        cleaned_resp_body = sanitize_body(response_bytes.decode("utf-8", errors="replace"))
+
+        cleaned_chunks = [
+            sanitize_string(chunk.decode("utf-8", errors="replace")) for chunk in self.chunks
+        ]
+
+        cleaned_resp_headers = sanitize_headers(dict(self.real_response.headers))
+        cleaned_resp_headers.pop("content-encoding", None)
+        cleaned_resp_headers.pop("content-length", None)
+
+        recorded_req = RecordedRequest(
+            method=self.request.method,
+            url=cleaned_url,
+            headers=cleaned_headers,
+            body=cleaned_req_body,
+            request_key=self.request_key,
+        )
+
+        recorded_resp = RecordedResponse(
+            status_code=self.real_response.status_code,
+            headers=cleaned_resp_headers,
+            body=cleaned_resp_body,
+            chunks=cleaned_chunks,
+            chunk_delays_ms=self.chunk_delays_ms,
+            is_streaming=True,
+            http_version=self.real_response.extensions.get("http_version", b"HTTP/1.1").decode(
+                "ascii", errors="ignore"
+            ),
+        )
+
+        entry = CassetteEntry(
+            step=self.step,
+            entry_type="http",
+            request=recorded_req,
+            response=recorded_resp,
+        )
+        self.cassette.append(entry)
+        self.cassette.save()
 
 
 class CassetteTransport(httpx.BaseTransport):
@@ -50,6 +180,9 @@ class CassetteTransport(httpx.BaseTransport):
         fork_step: int | None = None,
         real_transport: httpx.BaseTransport | None = None,
         chunk_delay_ms: int = 0,
+        record_partial_streams: bool = False,
+        matching_strategy: MatchingStrategy = "strict",
+        cassette: Cassette | None = None,
     ) -> None:
         if chunk_delay_ms < 0:
             raise ValueError("chunk_delay_ms must be non-negative")
@@ -58,26 +191,44 @@ class CassetteTransport(httpx.BaseTransport):
         self.mode = mode
         self.fork_step = fork_step
         self.real_transport = real_transport or httpx.HTTPTransport()
-        self.current_step = 0
         self.chunk_delay_ms = chunk_delay_ms
+        self.record_partial_streams = record_partial_streams
+        self.matching_strategy = matching_strategy
+        self._step_lock = threading.Lock()
+        self._step_counter = 0
+        self._active_recording_streams: list[_RecordingSyncByteStream] = []
 
-        if self.mode in ("replay", "fork") and self.cassette_path.exists():
+        if cassette is not None:
+            self.cassette = cassette
+        elif self.mode in ("replay", "fork") and self.cassette_path.exists():
             self.cassette = Cassette.load(self.cassette_path)
             if self.mode == "fork" and self.fork_step is not None:
                 self.cassette.truncate_after_step(self.fork_step)
         else:
             self.cassette = Cassette(self.cassette_path)
 
+    @property
+    def current_step(self) -> int:
+        """Current step index tracked on this transport instance."""
+        with self._step_lock:
+            return self._step_counter
+
+    def next_step(self) -> int:
+        """Atomically increment and return the next step index."""
+        with self._step_lock:
+            self._step_counter += 1
+            return self._step_counter
+
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        self.current_step += 1
+        current_step = self.next_step()
         body_bytes = request.read()
-        request_key = compute_request_key(request.method, str(request.url), body_bytes)
+        request_key = compute_request_key(
+            request.method, str(request.url), body_bytes, strategy=self.matching_strategy
+        )
 
         # Decide whether to replay from cassette or hit live network
         should_replay = self.mode == "replay" or (
-            self.mode == "fork"
-            and self.fork_step is not None
-            and self.current_step <= self.fork_step
+            self.mode == "fork" and self.fork_step is not None and current_step <= self.fork_step
         )
 
         if should_replay:
@@ -89,7 +240,7 @@ class CassetteTransport(httpx.BaseTransport):
             match = self.cassette.find_http_match(request_key)
             if match is None or match.response is None:
                 raise CassetteError(
-                    f"[Step {self.current_step}] No cassette match found in replay mode for "
+                    f"[Step {current_step}] No cassette match found in replay mode for "
                     f"{request.method} {request.url} (key: {request_key[:12]}...)"
                 )
 
@@ -101,6 +252,7 @@ class CassetteTransport(httpx.BaseTransport):
                     stream=_ReplayByteStream(
                         [chunk.encode("utf-8") for chunk in match.response.chunks],
                         chunk_delay_ms=self.chunk_delay_ms,
+                        chunk_delays_ms=match.response.chunk_delays_ms,
                     ),
                     request=request,
                 )
@@ -118,24 +270,36 @@ class CassetteTransport(httpx.BaseTransport):
 
         is_streaming = _is_event_stream(real_response.headers)
 
-        if is_streaming:
-            response_chunks = list(real_response.iter_raw())
-            response_bytes = b"".join(response_chunks)
-        else:
-            response_chunks = []
-            response_bytes = real_response.read()
+        live_return_headers = dict(real_response.headers)
+        live_return_headers.pop("content-encoding", None)
+        live_return_headers.pop("content-length", None)
 
-        # Sanitize headers, url and body before writing to disk
+        if is_streaming:
+            stream = _RecordingSyncByteStream(
+                real_response=real_response,
+                request=request,
+                step=current_step,
+                cassette=self.cassette,
+                request_key=request_key,
+                body_bytes=body_bytes,
+                record_partial_streams=self.record_partial_streams,
+            )
+            self._active_recording_streams.append(stream)
+            return httpx.Response(
+                status_code=real_response.status_code,
+                headers=live_return_headers,
+                stream=stream,
+                request=request,
+            )
+
+        response_bytes = real_response.read()
+
+        # Sanitize headers, url, and body before writing to disk
         cleaned_headers = sanitize_headers(normalize_headers(dict(request.headers)))
         cleaned_url = sanitize_url(str(request.url))
         cleaned_req_body = sanitize_body(normalize_body(body_bytes))
         cleaned_resp_body = sanitize_body(response_bytes.decode("utf-8", errors="replace"))
 
-        cleaned_chunks = [
-            sanitize_string(chunk.decode("utf-8", errors="replace")) for chunk in response_chunks
-        ]
-
-        # Sanitize response headers and strip content-encoding/length to prevent decompression bugs on replay
         cleaned_resp_headers = sanitize_headers(dict(real_response.headers))
         cleaned_resp_headers.pop("content-encoding", None)
         cleaned_resp_headers.pop("content-length", None)
@@ -152,34 +316,21 @@ class CassetteTransport(httpx.BaseTransport):
             status_code=real_response.status_code,
             headers=cleaned_resp_headers,
             body=cleaned_resp_body,
-            chunks=cleaned_chunks,
-            is_streaming=is_streaming,
+            chunks=[],
+            is_streaming=False,
             http_version=real_response.extensions.get("http_version", b"HTTP/1.1").decode(
                 "ascii", errors="ignore"
             ),
         )
 
         entry = CassetteEntry(
-            step=self.current_step,
+            step=current_step,
             entry_type="http",
             request=recorded_req,
             response=recorded_resp,
         )
         self.cassette.append(entry)
         self.cassette.save()
-
-        # Re-wrap response so caller can read it cleanly without double-decompression errors
-        live_return_headers = dict(real_response.headers)
-        live_return_headers.pop("content-encoding", None)
-        live_return_headers.pop("content-length", None)
-
-        if is_streaming:
-            return httpx.Response(
-                status_code=real_response.status_code,
-                headers=live_return_headers,
-                stream=_ReplayByteStream(response_chunks),
-                request=request,
-            )
 
         return httpx.Response(
             status_code=real_response.status_code,
@@ -189,5 +340,7 @@ class CassetteTransport(httpx.BaseTransport):
         )
 
     def close(self) -> None:
+        for stream in self._active_recording_streams:
+            stream.close()
         if hasattr(self.real_transport, "close"):
             self.real_transport.close()

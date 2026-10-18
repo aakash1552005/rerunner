@@ -1,7 +1,7 @@
-"""Safe execution stubbing for external agent side-effects (DB writes, Slack, payments).
+"""Safe execution stubbing for external agent side-effects (DB writes, Slack, payments) and deterministic tool decorators.
 
 Enforces fail-closed safety during replay, argument-hash based matching,
-sanitization of sensitive arguments/results, and thread/async context safety.
+sanitization of sensitive arguments/results, and thread/async context safety via contextvars.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import inspect
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from rerunner.cassette import Cassette
 from rerunner.models import CassetteEntry
@@ -29,8 +29,8 @@ class SideEffectError(Exception):
     """Raised when an unrecorded side-effect is encountered in replay mode or replay is unconfigured."""
 
 
-_ACTIVE_SESSION_CASSETTE_VAR: contextvars.ContextVar[Cassette | None] = contextvars.ContextVar(
-    "_rerunner_cassette", default=None
+_ACTIVE_CASSETTE: contextvars.ContextVar[Cassette | None] = contextvars.ContextVar(
+    "active_cassette", default=None
 )
 _ACTIVE_MODE_VAR: contextvars.ContextVar[str] = contextvars.ContextVar(
     "_rerunner_mode", default="replay"
@@ -64,20 +64,33 @@ def set_active_cassette(
     cassette: Cassette | Path | str | None,
     mode: str = "replay",
     fork_step: int | None = None,
-) -> None:
-    """Set the active cassette context for side-effect recording and stubbing."""
+) -> contextvars.Token[Cassette | None]:
+    """Set the active cassette context for side-effect recording and stubbing.
+
+    Returns the ContextVar token so nested contexts can be restored cleanly.
+    """
     _ACTIVE_MODE_VAR.set(mode)
     _ACTIVE_FORK_STEP_VAR.set(fork_step)
     _CURRENT_SIDE_EFFECT_STEP_VAR.set(0)
     _SIDE_EFFECT_CURSORS_VAR.set({})
 
     if cassette is None:
-        _ACTIVE_SESSION_CASSETTE_VAR.set(None)
-    elif isinstance(cassette, Cassette):
-        _ACTIVE_SESSION_CASSETTE_VAR.set(cassette)
-    else:
-        cass_obj = Cassette.load(cassette) if mode == "replay" else Cassette(cassette)
-        _ACTIVE_SESSION_CASSETTE_VAR.set(cass_obj)
+        return _ACTIVE_CASSETTE.set(None)
+    if isinstance(cassette, Cassette):
+        return _ACTIVE_CASSETTE.set(cassette)
+
+    cass_obj = Cassette.load(cassette) if mode == "replay" else Cassette(cassette)
+    return _ACTIVE_CASSETTE.set(cass_obj)
+
+
+def reset_active_cassette(token: contextvars.Token[Cassette | None]) -> None:
+    """Reset the active cassette ContextVar to the token's previous value."""
+    _ACTIVE_CASSETTE.reset(token)
+
+
+def get_active_cassette() -> Cassette | None:
+    """Return the active Cassette in the current context."""
+    return _ACTIVE_CASSETTE.get()
 
 
 def side_effect(name: str | None = None) -> Callable[[F], F]:
@@ -85,12 +98,6 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
 
     FAILS CLOSED: If no matching side-effect is recorded in the cassette, raises
     SideEffectError rather than executing live during replay.
-
-    Example:
-        @side_effect(name="charge_customer")
-        def charge_credit_card(user_id: str, amount: float) -> str:
-            # Only runs on live recording. During replay, returns recorded tx_id safely.
-            return stripe.charge(user_id, amount)
     """
 
     def decorator(func: F) -> F:
@@ -98,10 +105,10 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            cassette = _ACTIVE_SESSION_CASSETTE_VAR.get()
+            cassette = _ACTIVE_CASSETTE.get()
             mode = _ACTIVE_MODE_VAR.get()
             fork_step = _ACTIVE_FORK_STEP_VAR.get()
-            step = _CURRENT_SIDE_EFFECT_STEP_VAR.get() + 1
+            step = cassette.next_step() if cassette else _CURRENT_SIDE_EFFECT_STEP_VAR.get() + 1
             _CURRENT_SIDE_EFFECT_STEP_VAR.set(step)
 
             should_replay = mode == "replay" or (
@@ -122,14 +129,13 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                     _SIDE_EFFECT_CURSORS_VAR.set(cursors)
                 cursor = cursors.get(call_key, 0)
 
-                # Look up matching recorded side-effect entries
                 matching_entries = [
                     entry
                     for entry in cassette.entries
-                    if entry.entry_type == "side_effect" and entry.side_effect_name == fn_name
+                    if entry.entry_type in ("side_effect", "tool")
+                    and entry.side_effect_name == fn_name
                 ]
 
-                # If argument-level matches exist, prioritize exact argument match
                 exact_arg_matches = [
                     e
                     for e in matching_entries
@@ -149,17 +155,14 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                     _SIDE_EFFECT_CURSORS_VAR.set(cursors)
                     return matched_entry.side_effect_result
 
-                # FAIL CLOSED: Never run live during replay when no match exists
                 raise SideEffectError(
                     f"[Replay Step {step}] Unrecorded side effect '{fn_name}' (call_key: {call_key[:8]}). "
                     f"Side effects fail closed during replay to prevent unauthorized live execution."
                 )
 
-            # Live execution
             result = func(*args, **kwargs)
 
-            if cassette is not None and mode in ("record", "fork"):
-                # Sanitize arguments and result to prevent storing credit cards, passwords, etc.
+            if cassette is not None and mode in ("record", "fork", "auto"):
                 cleaned_args = sanitize_payload(list(args))
                 cleaned_kwargs = sanitize_payload(kwargs)
                 cleaned_result = sanitize_payload(result)
@@ -179,10 +182,10 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            cassette = _ACTIVE_SESSION_CASSETTE_VAR.get()
+            cassette = _ACTIVE_CASSETTE.get()
             mode = _ACTIVE_MODE_VAR.get()
             fork_step = _ACTIVE_FORK_STEP_VAR.get()
-            step = _CURRENT_SIDE_EFFECT_STEP_VAR.get() + 1
+            step = cassette.next_step() if cassette else _CURRENT_SIDE_EFFECT_STEP_VAR.get() + 1
             _CURRENT_SIDE_EFFECT_STEP_VAR.set(step)
 
             should_replay = mode == "replay" or (
@@ -206,7 +209,8 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                 matching_entries = [
                     entry
                     for entry in cassette.entries
-                    if entry.entry_type == "side_effect" and entry.side_effect_name == fn_name
+                    if entry.entry_type in ("side_effect", "tool")
+                    and entry.side_effect_name == fn_name
                 ]
 
                 exact_arg_matches = [
@@ -228,7 +232,6 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
                     _SIDE_EFFECT_CURSORS_VAR.set(cursors)
                     return matched_entry.side_effect_result
 
-                # FAIL CLOSED
                 raise SideEffectError(
                     f"[Replay Step {step}] Unrecorded side effect '{fn_name}' (call_key: {call_key[:8]}). "
                     f"Side effects fail closed during replay to prevent unauthorized live execution."
@@ -236,7 +239,7 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
 
             result = await func(*args, **kwargs)
 
-            if cassette is not None and mode in ("record", "fork"):
+            if cassette is not None and mode in ("record", "fork", "auto"):
                 cleaned_args = sanitize_payload(list(args))
                 cleaned_kwargs = sanitize_payload(kwargs)
                 cleaned_result = sanitize_payload(result)
@@ -259,3 +262,202 @@ def side_effect(name: str | None = None) -> Callable[[F], F]:
         return wrapper  # type: ignore[return-value]
 
     return decorator
+
+
+@overload
+def record_tool(func: F, /) -> F: ...
+
+
+@overload
+def record_tool(name: str, /) -> Callable[[F], F]: ...
+
+
+@overload
+def record_tool(*, name: str | None = None) -> Callable[[F], F]: ...
+
+
+def record_tool(
+    func_or_name: F | str | None = None,
+    /,
+    *,
+    name: str | None = None,
+) -> Any:
+    """Record and replay external tools, functions, and DB queries deterministically.
+
+    During 'record' mode, executes the wrapped function, serializes return value
+    (or raised exception) to the active cassette, and returns the result.
+    During 'replay' mode, bypasses live execution and returns the recorded result deterministically.
+    """
+
+    def create_decorator(tool_name: str | None) -> Callable[[F], F]:
+        def decorator(func: F) -> F:
+            fn_name = tool_name or func.__name__
+
+            @functools.wraps(func)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                cassette = _ACTIVE_CASSETTE.get()
+                mode = _ACTIVE_MODE_VAR.get()
+                fork_step = _ACTIVE_FORK_STEP_VAR.get()
+
+                if cassette is None:
+                    return func(*args, **kwargs)
+
+                step = cassette.next_step()
+                should_replay = mode == "replay" or (
+                    mode == "fork" and fork_step is not None and step <= fork_step
+                )
+
+                call_key = compute_side_effect_key(fn_name, args, kwargs)
+
+                if should_replay:
+                    matching = [
+                        e
+                        for e in cassette.entries
+                        if e.entry_type in ("tool", "side_effect") and e.side_effect_name == fn_name
+                    ]
+                    exact = [
+                        e
+                        for e in matching
+                        if compute_side_effect_key(
+                            e.side_effect_name or "",
+                            tuple(e.side_effect_args or []),
+                            e.side_effect_kwargs or {},
+                        )
+                        == call_key
+                    ]
+                    candidates = exact if exact else matching
+
+                    cursors = _SIDE_EFFECT_CURSORS_VAR.get() or {}
+                    cursor = cursors.get(call_key, 0)
+
+                    if cursor < len(candidates):
+                        match = candidates[cursor]
+                        cursors[call_key] = cursor + 1
+                        _SIDE_EFFECT_CURSORS_VAR.set(cursors)
+                        if match.side_effect_exception is not None:
+                            raise RuntimeError(match.side_effect_exception)
+                        return match.side_effect_result
+
+                    raise SideEffectError(
+                        f"[Replay Step {step}] No recorded tool execution found for '{fn_name}' "
+                        f"(key: {call_key[:8]}). Cannot execute live during replay."
+                    )
+
+                # Record mode execution
+                exc: Exception | None = None
+                try:
+                    result = func(*args, **kwargs)
+                except Exception as e:
+                    exc = e
+                    result = None
+
+                cleaned_args = sanitize_payload(list(args))
+                cleaned_kwargs = sanitize_payload(kwargs)
+                cleaned_result = sanitize_payload(result) if exc is None else None
+                exc_str = str(exc) if exc is not None else None
+
+                entry = CassetteEntry(
+                    step=step,
+                    entry_type="tool",
+                    side_effect_name=fn_name,
+                    side_effect_args=cleaned_args,
+                    side_effect_kwargs=cleaned_kwargs,
+                    side_effect_result=cleaned_result,
+                    side_effect_exception=exc_str,
+                )
+                cassette.append(entry)
+                cassette.save()
+
+                if exc is not None:
+                    raise exc
+                return result
+
+            @functools.wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                cassette = _ACTIVE_CASSETTE.get()
+                mode = _ACTIVE_MODE_VAR.get()
+                fork_step = _ACTIVE_FORK_STEP_VAR.get()
+
+                if cassette is None:
+                    return await func(*args, **kwargs)
+
+                step = cassette.next_step()
+                should_replay = mode == "replay" or (
+                    mode == "fork" and fork_step is not None and step <= fork_step
+                )
+
+                call_key = compute_side_effect_key(fn_name, args, kwargs)
+
+                if should_replay:
+                    matching = [
+                        e
+                        for e in cassette.entries
+                        if e.entry_type in ("tool", "side_effect") and e.side_effect_name == fn_name
+                    ]
+                    exact = [
+                        e
+                        for e in matching
+                        if compute_side_effect_key(
+                            e.side_effect_name or "",
+                            tuple(e.side_effect_args or []),
+                            e.side_effect_kwargs or {},
+                        )
+                        == call_key
+                    ]
+                    candidates = exact if exact else matching
+
+                    cursors = _SIDE_EFFECT_CURSORS_VAR.get() or {}
+                    cursor = cursors.get(call_key, 0)
+
+                    if cursor < len(candidates):
+                        match = candidates[cursor]
+                        cursors[call_key] = cursor + 1
+                        _SIDE_EFFECT_CURSORS_VAR.set(cursors)
+                        if match.side_effect_exception is not None:
+                            raise RuntimeError(match.side_effect_exception)
+                        return match.side_effect_result
+
+                    raise SideEffectError(
+                        f"[Replay Step {step}] No recorded tool execution found for '{fn_name}' "
+                        f"(key: {call_key[:8]}). Cannot execute live during replay."
+                    )
+
+                exc: Exception | None = None
+                try:
+                    result = await func(*args, **kwargs)
+                except Exception as e:
+                    exc = e
+                    result = None
+
+                cleaned_args = sanitize_payload(list(args))
+                cleaned_kwargs = sanitize_payload(kwargs)
+                cleaned_result = sanitize_payload(result) if exc is None else None
+                exc_str = str(exc) if exc is not None else None
+
+                entry = CassetteEntry(
+                    step=step,
+                    entry_type="tool",
+                    side_effect_name=fn_name,
+                    side_effect_args=cleaned_args,
+                    side_effect_kwargs=cleaned_kwargs,
+                    side_effect_result=cleaned_result,
+                    side_effect_exception=exc_str,
+                )
+                cassette.append(entry)
+                cassette.save()
+
+                if exc is not None:
+                    raise exc
+                return result
+
+            if inspect.iscoroutinefunction(func):
+                return async_wrapper  # type: ignore[return-value]
+            return sync_wrapper  # type: ignore[return-value]
+
+        return decorator
+
+    if callable(func_or_name):
+        return create_decorator(name)(func_or_name)
+    if isinstance(func_or_name, str):
+        return create_decorator(func_or_name)
+    return create_decorator(name)
