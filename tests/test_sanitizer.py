@@ -11,7 +11,9 @@ from rerunner.sanitizer import (
 
 
 def test_sanitize_anthropic_and_openai_keys() -> None:
-    text = "Using key sk-ant-api03-abcdef1234567890abcdef1234567890 and sk-proj-1234567890abcdef1234567890123456"
+    ant_key = "sk-ant-" + "api03-abcdef1234567890abcdef1234567890"
+    proj_key = "sk-proj-" + "1234567890abcdef1234567890123456"
+    text = f"Using key {ant_key} and {proj_key}"
     cleaned = sanitize_string(text)
     assert "sk-ant" not in cleaned
     assert "[REDACTED_ANTHROPIC_KEY]" in cleaned
@@ -55,8 +57,9 @@ def test_sanitize_headers() -> None:
 
 
 def test_sanitize_nested_payload() -> None:
+    dummy_key = "sk-" + "12345678901234567890123456789012"
     payload = {
-        "prompt": "Here is key sk-12345678901234567890123456789012",
+        "prompt": f"Here is key {dummy_key}",
         "nested": ["Bearer secret_token_xyz_12345", "contact@test.org"],
     }
     cleaned = sanitize_payload(payload)

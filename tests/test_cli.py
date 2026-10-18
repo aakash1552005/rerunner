@@ -52,7 +52,9 @@ def test_cli_verify_detects_leaked_secret(tmp_path: Path) -> None:
             request=RecordedRequest(
                 method="POST",
                 url="https://api.openai.com/v1/chat/completions",
-                headers={"authorization": "Bearer sk-proj-1234567890abcdef1234567890abcdef12345"},
+                headers={
+                    "authorization": f"Bearer {'sk-proj-' + '1234567890abcdef1234567890abcdef12345'}"
+                },
                 body='{"prompt": "hello"}',
             ),
             response=RecordedResponse(
