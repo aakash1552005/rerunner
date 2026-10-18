@@ -123,8 +123,16 @@ class S3StorageBackend(BaseStorageBackend):
         try:
             client.head_object(Bucket=bucket, Key=key)
             return True
-        except Exception:
-            return False
+        except Exception as exc:
+            error_code = ""
+            if hasattr(exc, "response") and isinstance(exc.response, dict):
+                error_code = str(exc.response.get("Error", {}).get("Code", ""))
+            if error_code in ("404", "NoSuchKey", "NotFound"):
+                return False
+            err_str = str(exc).lower()
+            if "404" in err_str or "not found" in err_str or "nosuchkey" in err_str:
+                return False
+            raise StorageBackendError(f"Error checking existence of S3 cassette '{uri}': {exc}") from exc
 
     def delete(self, uri: str) -> None:
         bucket, key = self._parse_s3_uri(uri)
@@ -188,8 +196,11 @@ class GCSStorageBackend(BaseStorageBackend):
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(blob_name)
             return blob.exists()  # type: ignore[no-any-return]
-        except Exception:
-            return False
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "404" in err_str or "not found" in err_str:
+                return False
+            raise StorageBackendError(f"Error checking existence of GCS cassette '{uri}': {exc}") from exc
 
     def delete(self, uri: str) -> None:
         bucket_name, blob_name = self._parse_gcs_uri(uri)

@@ -7,11 +7,8 @@
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
 [![Release](https://img.shields.io/badge/release-v0.2.1-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
 [![PyPI](https://img.shields.io/pypi/v/rerunner.svg)](https://pypi.org/project/rerunner/)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aakash1552005/rerunner)
-[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Governance](https://img.shields.io/badge/governance-CNCF%20Style-purple.svg)](GOVERNANCE.md)
-[![RFCs](https://img.shields.io/badge/architecture-Enterprise%20RFCs-purple.svg)](rfcs/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy%20strict-blue.svg)](https://mypy-lang.org/)
 
@@ -21,13 +18,13 @@
 
 ```text
   ┌────────────────────────────────────────────────────────────────────────┐
-  │  $ pytest tests/test_agent.py -v --rerunner-mode=replay                │
+  │  $ pytest tests/test_agent.py -v                                       │
   │                                                                        │
   │  tests/test_agent.py::test_rag_pipeline ....................... [100%] │
   │                                                                        │
   │  📼 [rerunner] Loaded cassette: tests/cassettes/rag_eval.jsonl        │
-  │  ⚡ Replayed: 8 LLM calls (OpenAI gpt-4o + Anthropic Claude 3.5)      │
-  │  🛡️ PII Check: 0 leaks | SHA-256: Verified [3a8f9c1b]                 │
+  │  ⚡ Replayed: 8 LLM calls (OpenAI gpt-4o + Anthropic Claude 3.7)      │
+  │  🛡️ PII Check: 0 leaks | Hash Chain: Verified [3a8f9c1b]              │
   │  ⏱️ Duration: 0.04s (Saved 18.4s of live network calls)               │
   │  💰 Token Cost: $0.00 (Saved $0.24 API credits)                       │
   │                                                                        │
@@ -39,44 +36,62 @@
 
 ## ⚡ The Problem
 
-Building production AI agents requires automated testing and continuous integration (CI). But running multi-step agents in tests creates three massive bottlenecks:
+Testing production AI agents and running them in Continuous Integration (CI) creates major bottlenecks:
 
-1. **Flaky CI Builds**: LLMs are non-deterministic. Even at `temperature=0`, small prompt variations break downstream assertions.
-2. **Exorbitant API Costs**: Re-running an 8-step agent across 50 pull requests burns thousands of dollars in LLM API credits.
-3. **Debug Nightmare**: When an agent fails at **Step 5**, you cannot reproduce the bug locally without paying to re-run Steps 1 through 4.
+1. **Flaky CI Builds**: LLMs are non-deterministic. Small model drift breaks downstream assertions across pull requests.
+2. **High API Costs**: Running an 8-step agent across dozens of CI runs drains thousands of dollars in LLM API credits.
+3. **Reproducibility & Debugging**: When an agent fails at **Step 5**, you cannot reproduce the bug locally without re-running Steps 1 through 4 live.
 
-**Rerunner** solves this by providing a zero-overhead, tamper-evident cassette recorder that intercepts `httpx` traffic natively across the **Anthropic Claude SDK**, **OpenAI SDK**, and custom agents.
+**Rerunner** solves this by providing a lightweight cassette recorder that intercepts `httpx` traffic natively across the **Anthropic Claude SDK**, **OpenAI SDK**, **Google GenAI SDK**, and custom agent frameworks.
 
 ---
 
 ## 🚀 Key Features
 
-* **$0 CI Replays**: Freeze agent runs into append-only JSONL cassettes. Replay in 0ms without hitting external LLM APIs.
-* **Fork from Step N**: Replay Steps 1..4 from the cassette for free, and execute Step 5 live against the model with your new prompt or bug fix.
-* **Tolerant Request Matching**: Automatically strips volatile nonces, millisecond timestamps, request IDs, and SDK metadata headers (`x-stainless-*`).
-* **Side-Effect Safety**: The `@side_effect` decorator prevents destructive external actions (database writes, Slack webhooks, payments) during replays.
-* **Cryptographic Integrity**: SHA-256 tamper-evident hash chaining ensures recorded cassettes have not been altered.
-* **Native Pytest Integration**: Seamless `@pytest.mark.rerunner` marker and fixtures.
+* **$0 CI Replays**: Record agent interactions to append-only JSONL cassettes and replay in CI with zero network latency and $0 token spend.
+* **Fork-from-Step Replay**: Replay steps 1..N from tape for free, and execute step N+1 live against the model with a modified prompt or code fix.
+* **Fail-Closed Side-Effect Guard**: The `@side_effect` decorator prevents destructive external actions (database updates, payments, webhooks) during replays, aborting immediately if an unrecorded side-effect is reached.
+* **Per-Key Cursor Matching**: Accurately replays repeated identical requests and retry loops in recorded sequential order.
+* **Streaming SSE Replay**: Records `text/event-stream` chunks and replays token-by-token with optional simulated network latency (`chunk_delay_ms`).
+* **JSON-Safe Secret Redaction**: Automatically scrubs API keys (`sk-ant-...`, `sk-proj-...`, `AIza...`), Bearer tokens, and URL parameters while strictly preserving JSON syntax and numeric values (such as Unix timestamps).
+* **Tamper-Evident Integrity**: SHA-256 hash chaining detects accidental line edits, with optional HMAC-SHA256 digital signing via `RERUNNER_HMAC_KEY`.
+* **Pytest Integration**: Seamless `@pytest.mark.rerunner` marker and `rerunner_transport` fixture.
+* **Pluggable Storage**: Store cassettes locally, in compressed formats (`.jsonl.gz`, `.jsonl.zst`), or directly in AWS S3 (`s3://`) and Google Cloud Storage (`gs://`).
 
 ---
 
 ## 📊 Comparison
 
-| Capability | `rerunner` | `vcrpy` | `LangSmith` | `LangGraph` |
+| Feature | `rerunner` | `vcrpy` / `pytest-recording` | `respx` | `LangGraph` Checkpoints |
 | :--- | :---: | :---: | :---: | :---: |
-| **Primary Focus** | **Deterministic CI Replay** | Generic HTTP | Web Observability | Orchestration |
-| **LLM Streaming (SSE) Support** | ✅ **Yes** | ❌ Breaks | ✅ Yes | N/A |
-| **Fork-from-Step Execution** | ✅ **Yes** | ❌ No | ❌ No | ⚠️ Graph-locked |
-| **Side-Effect Stubbing** | ✅ **Yes** | ❌ No | ❌ No | ❌ No |
-| **Zero Infrastructure / $0 Cost** | ✅ **Local JSONL** | ✅ Local YAML | ❌ Cloud / Paid | ❌ Variable |
-| **Framework Agnostic** | ✅ **Any httpx SDK** | ✅ HTTP | ⚠️ Complex | ❌ Locked |
+| **Primary Focus** | **Deterministic Agent CI Replay** | Generic HTTP recording | Manual HTTPX mocking | Orchestration State |
+| **LLM Streaming (SSE) Support** | ✅ **Native SSE token stream replay** | ⚠️ Buffers raw byte stream | ⚠️ Manual stream setup | N/A |
+| **Fork-from-Step Execution** | ✅ **Replay 1..N, execute live from N+1** | ❌ No | ❌ No | ⚠️ Subgraph re-execution |
+| **Fail-Closed Side-Effect Guard** | ✅ **Yes (`@side_effect`)** | ❌ No | ❌ No | ❌ No |
+| **Secret & URL Redaction** | ✅ **Built-in JSON & URL redactor** | ⚠️ Custom filter functions | ❌ No | ❌ No |
+| **Zero Cloud Infrastructure** | ✅ **Local JSONL / S3 / GCS** | ✅ Local YAML | ✅ In-memory | ⚠️ Postgres / Redis required |
+| **Framework Agnostic** | ✅ **Any HTTPX-based SDK** | ✅ HTTP socket level | ✅ HTTPX | ❌ Locked to LangGraph |
+
+---
+
+## 🔍 Scope & Limitations
+
+* **Transport Layer**: Rerunner intercepts `httpx.BaseTransport` and `httpx.AsyncBaseTransport`. This covers the official Python SDKs for Anthropic Claude, OpenAI, and Google GenAI.
+* **Other HTTP Libraries**: SDKs that rely exclusively on standard library `urllib`, `requests`, or raw gRPC (such as AWS Bedrock via `boto3` or Vertex AI gRPC channels) require configuring custom HTTPX client wrappers or transport bridges.
 
 ---
 
 ## 📦 Installation
 
 ```bash
+# Standard installation
 pip install rerunner
+
+# With optional extras
+pip install "rerunner[s3]"         # AWS S3 remote storage
+pip install "rerunner[gcs]"        # Google Cloud Storage
+pip install "rerunner[zstd]"       # Zstandard compression (.zst)
+pip install "rerunner[all]"        # All storage & compression extras
 ```
 
 ---
@@ -84,7 +99,7 @@ pip install rerunner
 ## 🛠️ Quickstart
 
 ### 1. Recording an Agent Session
-Rerunner transparently attaches to standard SDK clients via `httpx.Client(transport=...)`:
+Rerunner transparently attaches to SDK clients via `httpx.Client(transport=...)`:
 
 ```python
 import anthropic
@@ -96,9 +111,9 @@ transport = CassetteTransport("session.jsonl", mode="record")
 client = anthropic.Anthropic(http_client=httpx.Client(transport=transport))
 
 response = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
+    model="claude-3-7-sonnet-20250219",
     max_tokens=1024,
-    messages=[{"role": "user", "content": "Analyze quarterly revenue report."}]
+    messages=[{"role": "user", "content": "Analyze quarterly revenue report."}],
 )
 print(response.content[0].text)
 ```
@@ -111,9 +126,9 @@ client = anthropic.Anthropic(http_client=httpx.Client(transport=transport))
 
 # Instant response, zero cost, completely reproducible
 response = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
+    model="claude-3-7-sonnet-20250219",
     max_tokens=1024,
-    messages=[{"role": "user", "content": "Analyze quarterly revenue report."}]
+    messages=[{"role": "user", "content": "Analyze quarterly revenue report."}],
 )
 ```
 
@@ -128,44 +143,15 @@ with fork("session.jsonl", step=3) as session:
     # Step 4 executed live against model
 ```
 
-### Compressed Cassettes
-
-For long-running agent workflows, use the `.jsonl.gz` extension to store cassettes
-in gzip-compressed form:
-
-```python
-from rerunner import CassetteTransport
-
-transport = CassetteTransport("session.jsonl.gz", mode="record")
-```
-
-Rerunner automatically compresses `.jsonl.gz` cassettes when recording and
-decompresses them when replaying. The same CLI commands and SHA-256 integrity
-verification work with both `.jsonl` and `.jsonl.gz` files:
-
-```bash
-rerunner inspect session.jsonl.gz
-rerunner verify session.jsonl.gz
-rerunner play session.jsonl.gz
-```
-
-### Streaming Replay
-
-Rerunner records responses with a `text/event-stream` content type as individual
-chunks. During replay, those chunks are yielded through HTTPX's streaming
-interface without making another network request.
+### 4. Streaming SSE Replay
+Rerunner records responses with `text/event-stream` headers as individual chunks and yields them through HTTPX's streaming interface during replay:
 
 ```python
 import httpx
 import openai
-
 from rerunner import CassetteTransport
 
-transport = CassetteTransport(
-    "agent_run.jsonl",
-    mode="replay",
-)
-
+transport = CassetteTransport("agent_run.jsonl", mode="replay", chunk_delay_ms=20)
 client = openai.OpenAI(
     api_key="not-used-during-replay",
     http_client=httpx.Client(transport=transport),
@@ -181,47 +167,32 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="")
 ```
 
-`AsyncCassetteTransport` provides the equivalent asynchronous streaming
-interface for consumers using `async for`.
-
-To simulate the timing of a live stream in UI tests, configure a delay between
-replayed chunks:
-
-```python
-transport = CassetteTransport(
-    "agent_run.jsonl",
-    mode="replay",
-    chunk_delay_ms=25,
-)
-```
-
-The first chunk is returned immediately. Each subsequent chunk is delayed by
-the configured number of milliseconds. The default value is `0`, which adds no
-intentional delay. Buffered responses continue to use the existing replay
-behavior.
-
 ---
 
-## 🛡️ Guarding Destructive Side-Effects
+## 🛡️ Guarding External Side-Effects
 
-Ensure your replayed agents don't charge cards or send duplicate Slack messages:
+Use `@side_effect` to prevent destructive actions (database writes, notifications, payment charges) during replay:
 
 ```python
 from rerunner import side_effect
 
-@side_effect(name="post_slack_alert")
-def send_slack_notification(channel: str, message: str) -> bool:
-    # Runs live during recording. During replay, safely returns recorded result!
-    return slack_client.chat_postMessage(channel=channel, text=message)
+@side_effect(name="charge_customer")
+def charge_card(user_id: str, amount: float) -> str:
+    # Runs live during recording.
+    # During replay, returns recorded result and never touches Stripe.
+    # If no recorded call matches, fails closed by raising SideEffectError!
+    return stripe.charge(user_id, amount)
 ```
 
 ---
 
 ## 🧪 Pytest Integration
 
-Mark your unit tests with `@pytest.mark.rerunner`:
+Mark your tests with `@pytest.mark.rerunner`:
 
 ```python
+import httpx
+import openai
 import pytest
 
 @pytest.mark.rerunner("tests/fixtures/agent_run.jsonl")
@@ -229,41 +200,37 @@ def test_agent_decision(rerunner_transport):
     client = openai.OpenAI(http_client=httpx.Client(transport=rerunner_transport))
     completion = client.chat.completions.create(
         model="gpt-4o",
-        messages=[{"role": "user", "content": "Evaluate risk factor"}]
+        messages=[{"role": "user", "content": "Evaluate risk factor"}],
     )
     assert "low risk" in completion.choices[0].message.content.lower()
 ```
 
-# Run test suite in replay mode (0 network calls, $0 cost)
+Run tests from the terminal:
+
+```bash
+# Run test suite in replay mode (0 network calls, $0 token cost)
 pytest
 
-# Re-record all cassettes when prompts change intentionally
+# Re-record cassettes when prompts change intentionally
 pytest --rerunner-record
 ```
-
-For a reusable GitHub Actions workflow that restores recorded cassettes before
-replay tests, see the [GitHub Actions cassette caching recipe](docs/recipes/github_actions_caching.md).
 
 ---
 
 ## ⚡ 1-Line Client Wrappers
 
-Wrap your existing SDK instances with zero configuration:
+Wrap existing SDK clients directly:
 
 ```python
 import anthropic
 import openai
-from google import genai
-from rerunner.integrations import wrap_anthropic, wrap_google_genai, wrap_openai
+from rerunner.integrations import wrap_anthropic, wrap_openai
 
-# Wrap Anthropic Claude client
+# Wrap Anthropic Claude client (sync or async)
 client_claude = wrap_anthropic(anthropic.Anthropic(), "agent_run.jsonl", mode="replay")
 
-# Wrap OpenAI client
+# Wrap OpenAI client (sync or async)
 client_openai = wrap_openai(openai.OpenAI(), "agent_run.jsonl", mode="replay")
-
-# Wrap Google GenAI / Vertex AI Gemini client
-client_gemini = wrap_google_genai(genai.Client(), "agent_run.jsonl", mode="replay")
 ```
 
 ### LangChain & LangGraph Integration
@@ -276,32 +243,16 @@ agent_executor.invoke({"input": "Fetch stock price"}, config={"callbacks": [hand
 
 ---
 
-## 🔭 OpenTelemetry (OTel) Distributed Traces
+## 🔒 Automated Secret & URL Sanitization
 
-Bridge testing and enterprise observability. Export cassettes to standardized OpenTelemetry trace JSON compatible with **Datadog, Jaeger, Grafana Tempo, and Dynatrace**:
-
-```bash
-# Export cassette to OpenTelemetry trace
-rerunner export-otel session.jsonl --output trace.otel.json --service-name "fraud-agent"
-```
-
-Or programmatically in Python:
-```python
-from rerunner import export_cassette_to_otel_file
-
-export_cassette_to_otel_file("session.jsonl", "trace.otel.json", service_name="fraud-agent")
-```
-
----
-
-## 🔒 Enterprise Secret & PII Sanitization
-
-Never accidentally commit API keys or auth tokens to GitHub. Rerunner automatically scrubs:
-* Anthropic API keys (`sk-ant-...`) $\rightarrow$ `[REDACTED_ANTHROPIC_KEY]`
-* OpenAI API keys (`sk-proj-...`, `sk-...`) $\rightarrow$ `[REDACTED_OPENAI_KEY]`
-* Google AI Studio / Gemini keys $\rightarrow$ `[REDACTED_API_KEY]`
-* Authorization headers (`Bearer ...`) $\rightarrow$ `Bearer [REDACTED_TOKEN]`
-* AWS access keys (`AKIA...`) $\rightarrow$ `[REDACTED_AWS_KEY_ID]`
+Rerunner automatically redacts sensitive data before persisting cassettes:
+* **Anthropic Keys** (`sk-ant-...`) $\rightarrow$ `[REDACTED_ANTHROPIC_KEY]`
+* **OpenAI Keys** (`sk-proj-...`, `sk-...`) $\rightarrow$ `[REDACTED_OPENAI_KEY]`
+* **Google API Keys** (`AIza...`) $\rightarrow$ `[REDACTED_GOOGLE_API_KEY]`
+* **URL Query Parameters** (`?key=...`, `?api_key=...`, `?token=...`) $\rightarrow$ `[REDACTED_API_KEY]`
+* **Authorization Headers** (`Bearer ...`) $\rightarrow$ `Bearer [REDACTED_TOKEN]`
+* **Credit Cards** (validated with Luhn checksum) $\rightarrow$ `[REDACTED_CREDIT_CARD]`
+* **JSON Structure Preservation**: Numeric fields (like `"created": 1730000000`) remain valid numbers.
 
 ---
 
@@ -320,32 +271,25 @@ rerunner inspect session.jsonl
 # Export cassette into OpenTelemetry OTLP trace format
 rerunner export-otel session.jsonl -o session.otel.json
 
-# Cryptographically verify tamper-evident hash chain
+# Verify cassette integrity
 rerunner verify session.jsonl
 
 # Compare prompt and response divergences between two cassettes
 rerunner diff session_v1.jsonl session_v2.jsonl
 ```
 
-
 ---
 
-## 🤝 Contributing & Enterprise Architecture
+## 🤝 Contributing
 
-Contributions from the open-source community and frontier AI research teams are warmly welcomed:
-
-* 🚀 **One-Click Cloud Dev**: Launch an instant ready-to-code workspace via [GitHub Codespaces](https://codespaces.new/aakash1552005/rerunner).
-* 📜 **Governance & Maintainership**: Review our [CNCF-style Governance Model & Review SLA](GOVERNANCE.md).
-* 🚀 **First-Time Contributors**: Follow our [5-Minute Onboarding Guide](docs/ONBOARDING.md) to set up and submit your first PR.
-* 🏷️ **Good First Issues**: Grab starter tasks on [GitHub Issues](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-* 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and linting rules.
-* 🗺️ **Strategic Vision**: Review our [ROADMAP.md](ROADMAP.md) for planned milestones.
-* 🏛️ **Enterprise RFCs**: Propose or review major architectural designs in our [RFC Directory](rfcs/) or open an [RFC Issue](https://github.com/aakash1552005/rerunner/issues/new?template=rfc.yml).
-* 🏆 **Hall of Fame**: Meet the community members in [AUTHORS.md](AUTHORS.md).
+Contributions are welcomed:
+* 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and testing instructions.
+* 🏷️ **Starter Issues**: Look for tasks labeled [`good first issue`](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+* 🗺️ **Roadmap**: Check [ROADMAP.md](ROADMAP.md) for upcoming milestones.
+* 📜 **Governance**: Review [GOVERNANCE.md](GOVERNANCE.md).
 
 ---
 
 ## 📜 License
 
 Rerunner is licensed under the [Apache 2.0 License](LICENSE).
-

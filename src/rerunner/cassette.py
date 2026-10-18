@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
 from rerunner.models import CassetteEntry, CassetteMetadata
 from rerunner.storage import get_storage_backend
@@ -27,10 +28,15 @@ class Cassette:
 
     def __init__(self, path: Path | str, metadata: CassetteMetadata | None = None) -> None:
         self.uri = str(path)
-        self.path = Path(path) if not (self.uri.startswith("s3://") or self.uri.startswith("gs://")) else Path(self.uri.split("/")[-1])
+        self.path = (
+            Path(path)
+            if not (self.uri.startswith("s3://") or self.uri.startswith("gs://"))
+            else Path(self.uri.split("/")[-1])
+        )
         self.metadata = metadata or CassetteMetadata()
         self.entries: list[CassetteEntry] = []
         self._last_hash = "GENESIS"
+        self._request_cursors: dict[str, int] = {}
 
     @classmethod
     def load(cls, path: Path | str, verify_integrity: bool = True) -> Cassette:
@@ -97,12 +103,29 @@ class Cassette:
 
         return cassette
 
+    def next_step(self) -> int:
+        """Return the next sequential execution step number for unified HTTP and side-effect sequencing."""
+        return len(self.entries) + 1
+
     def append(self, entry: CassetteEntry) -> None:
         """Append a new entry to the in-memory cassette with tamper-evident chaining."""
         entry.prev_hash = self._last_hash
         entry.entry_hash = compute_entry_hash(entry, self._last_hash)
         self.entries.append(entry)
         self._last_hash = entry.entry_hash
+
+    def truncate_after_step(self, step: int) -> None:
+        """Truncate all entries recorded after a specific step (used for fork-from-step)."""
+        self.entries = [e for e in self.entries if e.step <= step]
+        if self.entries:
+            self._last_hash = self.entries[-1].entry_hash
+        else:
+            self._last_hash = "GENESIS"
+        self.reset_cursors()
+
+    def reset_cursors(self) -> None:
+        """Reset replay cursors to the beginning of the recorded cassette."""
+        self._request_cursors.clear()
 
     def save(self) -> None:
         """Write the complete cassette to disk or remote storage atomically, using gzip (.gz) or zstandard (.zst)."""
@@ -133,16 +156,41 @@ class Cassette:
 
         backend.write_bytes(self.uri, data_bytes)
 
-    def find_http_match(self, request_key: str, step: int | None = None) -> CassetteEntry | None:
-        """Find a recorded HTTP response matching the request key, optionally at a specific step."""
-        for entry in self.entries:
+    def find_http_match(
+        self, request_key: str, step: int | None = None, consume: bool = True
+    ) -> CassetteEntry | None:
+        """Find a recorded HTTP response matching the request key with per-key cursor support."""
+        if step is not None:
+            for entry in self.entries:
+                if (
+                    entry.entry_type == "http"
+                    and entry.request
+                    and entry.request.request_key == request_key
+                    and entry.step == step
+                ):
+                    return entry
+            return None
+
+        matching_entries = [
+            entry
+            for entry in self.entries
             if (
                 entry.entry_type == "http"
                 and entry.request
                 and entry.request.request_key == request_key
-                and (step is None or entry.step == step)
-            ):
-                return entry
+            )
+        ]
+
+        if not matching_entries:
+            return None
+
+        cursor = self._request_cursors.get(request_key, 0)
+        if cursor < len(matching_entries):
+            entry = matching_entries[cursor]
+            if consume:
+                self._request_cursors[request_key] = cursor + 1
+            return entry
+
         return None
 
     def __len__(self) -> int:

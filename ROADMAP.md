@@ -1,6 +1,6 @@
 # 🗺️ Rerunner Strategic Roadmap
 
-Our mission is to establish **Rerunner** as the industry-standard deterministic test runner, flight recorder, and CI infrastructure for agentic AI applications worldwide.
+Our mission is to establish **Rerunner** as the standard deterministic test runner, flight recorder, and CI infrastructure for agentic AI applications.
 
 ---
 
@@ -8,18 +8,18 @@ Our mission is to establish **Rerunner** as the industry-standard deterministic 
 
 | Release | Focus Area | Status | Target Timeline |
 | :--- | :--- | :---: | :---: |
-| **v0.1.0** | Core Deterministic Replay Engine | ✅ **Shipped** | Q3 2026 |
-| **v0.1.1** | Gzip Compression & CI Remote Caching | ✅ **Shipped** | Q4 2026 |
-| **v0.2.0** | Observability & Frontier Ecosystem | 🔄 **Current** | Q4 2026 |
-| **v0.3.0** | Enterprise Governance & Streaming Replay | ⏳ **Planned** | Q1 2027 |
-| **v1.0.0** | Cloud-Native Distributed Flight Recorder | 🎯 **Long-Term** | Q2 2027 |
+| **v0.1.0** | Core Deterministic Replay Engine | ✅ **Shipped** | Foundation |
+| **v0.2.0** | SSE Streaming, Remote Stores & Integrations | ✅ **Shipped** | Core Ecosystem |
+| **v0.2.1** | Hardened Sanitizer, Fail-Closed Guards & Cursor Matching | 🔄 **Current** | Stability & Safety |
+| **v0.3.0** | MCP Protocol Replay & Official GitHub Action | ⏳ **Planned** | Next Up |
+| **v1.0.0** | Centralized Replay Registry & Web Flight Deck | 🎯 **Long-Term** | Future Vision |
 
 ---
 
-## ✅ v0.1.0 — Core Replay Engine (Completed)
-- [x] Modern PEP 621 packaging and strict typed architecture (`pyproject.toml`)
+## ✅ v0.1.0 — Core Replay Engine (Shipped)
+- [x] Modern PEP 621 packaging and typed architecture (`pyproject.toml`)
 - [x] Pydantic v2 Cassette schema with streaming JSONL persistence format
-- [x] Cryptographic SHA-256 tamper-evident hash chaining between execution steps
+- [x] SHA-256 tamper and corruption detection hash chaining between execution steps
 - [x] Synchronous `CassetteTransport` (for Anthropic & OpenAI SDKs)
 - [x] Asynchronous `AsyncCassetteTransport` for async agent runtimes
 - [x] Tolerant request matching (stripping volatile nonces, timestamps, and `x-stainless-*` headers)
@@ -30,43 +30,49 @@ Our mission is to establish **Rerunner** as the industry-standard deterministic 
 
 ---
 
-## ✅ v0.1.1 — Compression & Remote Caching (Completed)
-- [x] Gzip-compressed cassette archives for large traces (`.jsonl.gz`)
-- [x] GitHub Actions remote cassette caching recipe (`actions/cache@v4`)
-- [x] Streamlined packaging with automated PyPI publishing workflows
+## ✅ v0.2.0 — Streaming Replay, Remote Storage & Integrations (Shipped)
+- [x] **Streaming SSE Token-by-Token Replayer**: Replay `text/event-stream` chunks for agent streaming tests
+- [x] **Configurable Chunk Delay**: Simulated SSE network latency via `chunk_delay_ms`
+- [x] **Pluggable Remote Stores**: AWS S3 (`s3://`) and Google Cloud Storage (`gs://`) backend support
+- [x] **Zstandard & Gzip Compression**: High-efficiency `.jsonl.zst` and `.jsonl.gz` trace storage
+- [x] **OpenTelemetry (OTel) Export**: `rerunner export-otel` converting cassettes into OTLP spans for Datadog, Jaeger, and Grafana Tempo
+- [x] **1-Line SDK Wrappers**: Direct attachment for Anthropic, OpenAI, and Google GenAI clients
+- [x] **Framework Integrations**: LangChain / LangGraph callback handler & LlamaIndex hooks
 
 ---
 
-## 🔄 v0.2.0 — Observability & Frontier Ecosystem (In Progress)
-- [x] **OpenTelemetry (OTel) Export**: `rerunner export-otel` converting cassettes into OTLP-compliant spans for Datadog, Jaeger, Grafana Tempo, and Dynatrace
-- [x] **Google GenAI / Vertex AI Adapter**: Zero-friction `wrap_google_genai` / `wrap_vertexai`
-- [x] First-class LangChain & LangGraph callback hooks (`RerunnerCallbackHandler`)
-- [ ] **LlamaIndex Instrumentation Hook**: Transparent callback handler for index queries
-- [ ] **Microsoft AutoGen & Semantic Kernel Interceptors**: Multi-agent orchestration tracing
-- [ ] **CrewAI Agent Runner Integration**: Native replay wrapper for multi-role workflows
+## 🔄 v0.2.1 — Hardened Sanitizer & Replay Determinism (Current)
+- [x] **JSON-Safe Secret Redactor**: Parse JSON bodies to scrub strings without corrupting numeric Unix timestamps or booleans
+- [x] **Luhn Check for Credit Cards**: Prevent false positives on 16-digit entity IDs
+- [x] **Per-Key Cursor Matching**: Accurately replay repeated identical requests and retry loops in recorded order
+- [x] **Fail-Closed Side Effects**: Unrecorded side-effects immediately abort during replay to prevent unauthorized live execution
+- [x] **Side-Effect Argument Matching & Sanitization**: Match side-effects by argument hash and redact sensitive arguments/results
+- [x] **Gzip Response Header Normalization**: Strip `content-encoding` and `content-length` so decoded bodies replay without DecodingError
+- [x] **URL Credential Scrubbing**: Redact API keys from query strings (`?key=...`) and URL paths
+- [x] **Proxy Mount Isolation**: Ensure cassette transports take precedence over `HTTPS_PROXY` environment mounts
+- [x] **HMAC Cryptographic Signing**: Support HMAC-SHA256 cassette validation via `RERUNNER_HMAC_KEY`
+
+---
+
+## ⏳ v0.3.0 — MCP Protocol Replay & Official GitHub Action (Planned)
+- [ ] **Model Context Protocol (MCP) Replay**: Deterministically record and replay MCP tool invocations and server sessions
 - [ ] **Official GitHub Action (`rerunner-action`)**: Zero-config marketplace action for cassette caching and drift checks
+- [ ] **Drift & Cost Report in CI**: Detailed terminal and PR comment summary showing changed prompts and estimated token savings
+- [ ] **Cassette Scrub & Doctor CLI**: `rerunner doctor` and `rerunner scrub` commands to audit existing cassettes for secrets
+- [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets
 
 ---
 
-## ⏳ v0.3.0 — Enterprise Governance & Streaming Replay (Planned)
-- [ ] **Streaming SSE Token-by-Token Replayer**: Replay `text/event-stream` chunks for live frontend testing with 0 API tokens
-- [ ] **Enterprise PII / Secret Sanitization Pipeline**: Pluggable redaction engine using Microsoft Presidio and regex masks
-- [ ] **Asymmetric Ed25519 Digital Signatures**: Cryptographically sign cassettes with corporate certs for SOC2/ISO audit compliance
+## 🎯 v1.0.0 — Centralized Replay Registry & Web Flight Deck (Future Vision)
+- [ ] **Centralized Replay Registry**: Multi-developer cassette sharing with automatic versioning and CI deduplication
+- [ ] **Web Flight Deck UI**: Interactive browser visualizer for scrubbing through multi-step agent executions and tool calls
 - [ ] **Semantic Drift Detection**: Embedding-based tolerant matching to alert when prompt alterations diverge from cassette intent
-
----
-
-## 🎯 v1.0.0 — Cloud-Native Distributed Flight Recorder (Future)
-- [ ] **Pluggable Remote Cassette Stores**: Direct streaming to AWS S3, Google Cloud Storage (GCS), and Azure Blob
-- [ ] **Centralized Replay Registry**: Enterprise team cassette sharing with automatic versioning and CI deduplication
-- [ ] **Web Flight Deck UI**: Interactive browser visualizer for scrubbing through multi-step agent executions
 
 ---
 
 ## 🤝 Contributing & Submitting RFCs
 
-We actively invite engineering teams and research labs to contribute to the roadmap:
+We actively invite community contributions:
 1. For architectural proposals, open an [RFC (Request for Comments)](.github/ISSUE_TEMPLATE/rfc.yml).
-2. For manageable enhancements, check issues tagged [`good first issue`](https://github.com/aakash1552005/rerunner/labels/good%20first%20issue).
-
+2. For starter tasks, check issues tagged [`good first issue`](https://github.com/aakash1552005/rerunner/labels/good%20first%20issue).
 3. Review our [Contributing Guide](CONTRIBUTING.md) for code standards and setup instructions.

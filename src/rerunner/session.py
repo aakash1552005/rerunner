@@ -38,6 +38,7 @@ def record(cassette_path: Path | str) -> Iterator[SessionContext]:
     finally:
         transport.cassette.save()
         set_active_cassette(None)
+        transport.close()
 
 
 @contextmanager
@@ -50,6 +51,7 @@ def replay(cassette_path: Path | str) -> Iterator[SessionContext]:
         yield session
     finally:
         set_active_cassette(None)
+        transport.close()
 
 
 @contextmanager
@@ -63,3 +65,4 @@ def fork(cassette_path: Path | str, step: int) -> Iterator[SessionContext]:
     finally:
         transport.cassette.save()
         set_active_cassette(None)
+        transport.close()

@@ -6,6 +6,7 @@ We release patches and security fixes for the following versions:
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.2.x   | :white_check_mark: |
 | 0.1.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
@@ -14,8 +15,8 @@ The Rerunner team takes security vulnerabilities seriously, especially because t
 
 If you believe you have discovered a vulnerability, please **DO NOT** open a public issue.
 
-Instead, please send an email to:
-**security@rerunner.dev**
+Instead, please report it via [GitHub Security Advisories](https://github.com/aakash1552005/rerunner/security/advisories/new) or send an email to:
+**aakash1552005@gmail.com**
 
 Include the following in your report:
 1. Type of issue (e.g., credential leakage in cassette normalizer, memory leak, unsafe deserialization).
