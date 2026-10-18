@@ -198,12 +198,12 @@ def sanitize_payload(
     if hasattr(data, "model_dump") and callable(data.model_dump):
         try:
             return sanitize_payload(data.model_dump(mode="python"), custom_patterns=custom_patterns)
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if dataclasses.is_dataclass(data) and not isinstance(data, type):
         try:
             return sanitize_payload(dataclasses.asdict(data), custom_patterns=custom_patterns)
-        except Exception:
+        except Exception:  # nosec B110
             pass
     if isinstance(data, str):
         return sanitize_string(data, custom_patterns=custom_patterns)

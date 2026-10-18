@@ -63,7 +63,7 @@ def _rehydrate_result(func: Callable[..., Any], result: Any) -> Any:
         localns = {**closure_vars.globals, **closure_vars.nonlocals}
         hints = typing.get_type_hints(func, localns=localns)
         ret_type = hints.get("return")
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     if ret_type is None:
@@ -97,7 +97,7 @@ def _rehydrate_result(func: Callable[..., Any], result: Any) -> Any:
                     return target.model_validate(result)
                 if dataclasses.is_dataclass(target):
                     return target(**result)
-    except Exception:
+    except Exception:  # nosec B110
         pass
     return result
 
