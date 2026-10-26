@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rerunner.cassette import Cassette
-from rerunner.integrity import verify_cassette_integrity
+from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
 from rerunner.models import CassetteEntry
-from rerunner.sanitizer import find_sensitive_leaks
+from rerunner.sanitizer import (
+    find_sensitive_leaks,
+    sanitize_headers,
+    sanitize_payload,
+    sanitize_string,
+    sanitize_url,
+)
 
 
 def _extract_tokens_from_body(body_str: str) -> int | None:
@@ -496,6 +503,201 @@ def export_otel(
     except Exception as exc:
         console.print(f"[bold red]Error exporting to OpenTelemetry:[/] {exc}")
         sys.exit(1)
+
+
+@app.command()
+def doctor() -> None:
+    """Run diagnostic checks on your environment, installed SDKs, and storage backends."""
+    table = Table(
+        title="🩺 Rerunner System Diagnostic", show_header=True, header_style="bold cyan"
+    )
+    table.add_column("Category", style="bold", width=14)
+    table.add_column("Component", style="cyan", width=22)
+    table.add_column("Status", width=14)
+    table.add_column("Details", style="dim")
+
+    # 1. Python runtime
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_status = (
+        "[bold green]✔ Compatible[/]"
+        if sys.version_info >= (3, 10)
+        else "[bold red]❌ Unsupported[/]"
+    )
+    table.add_row("Runtime", "Python", py_status, f"Python {py_ver} ({sys.platform})")
+
+    # 2. Core dependencies
+    for pkg_name in ["typer", "rich", "pydantic", "httpx"]:
+        try:
+            import importlib.metadata
+
+            v = importlib.metadata.version(pkg_name)
+            table.add_row("Core", pkg_name, "[bold green]✔ Installed[/]", f"v{v}")
+        except Exception:
+            table.add_row("Core", pkg_name, "[bold red]❌ Missing[/]", "Required core dependency")
+
+    # 3. Storage backends & compression
+    for pkg_name, label in [
+        ("zstandard", "Zstandard (.zst)"),
+        ("boto3", "AWS S3 (s3://)"),
+        ("google.cloud.storage", "Google Cloud Storage (gs://)"),
+    ]:
+        try:
+            __import__(pkg_name)
+            table.add_row("Storage", label, "[bold green]✔ Available[/]", "Enabled")
+        except ImportError:
+            table.add_row(
+                "Storage", label, "[dim yellow]○ Not installed[/]", "Optional backend"
+            )
+
+    # 4. Agent & LLM SDKs
+    for mod_name, label in [
+        ("openai", "OpenAI SDK"),
+        ("anthropic", "Anthropic SDK"),
+        ("google.genai", "Google GenAI SDK"),
+        ("langchain", "LangChain"),
+        ("llama_index", "LlamaIndex"),
+    ]:
+        try:
+            __import__(mod_name)
+            table.add_row("Integrations", label, "[bold green]✔ Detected[/]", "Auto-patch ready")
+        except ImportError:
+            table.add_row(
+                "Integrations", label, "[dim yellow]○ Not installed[/]", "Optional framework"
+            )
+
+    # 5. Environment configuration
+    rec_mode = os.getenv("RERUNNER_RECORD_MODE", "once")
+    table.add_row("Config", "RERUNNER_RECORD_MODE", "[bold green]✔ Set[/]", f"Mode: '{rec_mode}'")
+
+    cass_dir = os.getenv("RERUNNER_CASSETTE_DIR", ".rerunner/cassettes")
+    table.add_row("Config", "RERUNNER_CASSETTE_DIR", "[bold green]✔ Set[/]", f"Path: '{cass_dir}'")
+
+    hmac_key = os.getenv("RERUNNER_HMAC_KEY")
+    if hmac_key:
+        table.add_row(
+            "Security",
+            "RERUNNER_HMAC_KEY",
+            "[bold green]✔ Active[/]",
+            "HMAC-SHA256 signing enabled",
+        )
+    else:
+        table.add_row(
+            "Security",
+            "RERUNNER_HMAC_KEY",
+            "[dim yellow]○ Not set[/]",
+            "Using SHA-256 integrity (non-keyed)",
+        )
+
+    console.print(table)
+    console.print("[bold green]✔ Rerunner diagnostic complete![/]")
+
+
+@app.command()
+def scrub(
+    cassette_path: Path = typer.Argument(..., help="Path to the cassette file (.jsonl, .zst, .gz)"),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Destination path for scrubbed cassette. If omitted, overwrites in-place.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Simulate scrubbing and report leaks without modifying the cassette file.",
+    ),
+) -> None:
+    """Scan and scrub existing cassettes of leaked API keys and PII, re-signing the SHA-256 chain."""
+    try:
+        cassette = Cassette.load(cassette_path, verify_integrity=False)
+    except Exception as exc:
+        console.print(f"[bold red]Error loading cassette:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    # 1. Scan before
+    initial_leaks: list[str] = []
+    for entry in cassette.entries:
+        if entry.entry_type == "http" and entry.request and entry.response:
+            initial_leaks.extend(find_sensitive_leaks(entry.request.headers))
+            initial_leaks.extend(find_sensitive_leaks(entry.request.body))
+            initial_leaks.extend(find_sensitive_leaks(entry.response.headers))
+            initial_leaks.extend(find_sensitive_leaks(entry.response.body))
+        elif entry.entry_type in ("side_effect", "tool"):
+            if entry.side_effect_args:
+                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
+            if entry.side_effect_result:
+                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
+
+    initial_leaks = list(dict.fromkeys(initial_leaks))
+
+    # 2. Scrub entries
+    scrubbed_count = 0
+    expected_prev = "GENESIS"
+
+    for entry in cassette.entries:
+        if entry.entry_type == "http" and entry.request and entry.response:
+            entry.request.url = sanitize_url(entry.request.url)
+            entry.request.headers = sanitize_headers(entry.request.headers)
+            try:
+                body_json = json.loads(entry.request.body)
+                entry.request.body = json.dumps(
+                    sanitize_payload(body_json), separators=(",", ":")
+                )
+            except Exception:
+                entry.request.body = sanitize_string(entry.request.body)
+
+            entry.response.headers = sanitize_headers(entry.response.headers)
+            try:
+                body_json = json.loads(entry.response.body)
+                entry.response.body = json.dumps(
+                    sanitize_payload(body_json), separators=(",", ":")
+                )
+            except Exception:
+                entry.response.body = sanitize_string(entry.response.body)
+
+            if entry.response.chunks:
+                entry.response.chunks = [sanitize_string(c) for c in entry.response.chunks]
+            scrubbed_count += 1
+        elif entry.entry_type in ("side_effect", "tool"):
+            if entry.side_effect_args:
+                entry.side_effect_args = sanitize_payload(entry.side_effect_args)
+            if entry.side_effect_result:
+                entry.side_effect_result = sanitize_payload(entry.side_effect_result)
+            scrubbed_count += 1
+
+        # Re-compute cryptographic hash chain
+        entry.prev_hash = expected_prev
+        entry.entry_hash = compute_entry_hash(entry, expected_prev)
+        expected_prev = entry.entry_hash
+
+    target = output_path or cassette_path
+
+    if dry_run:
+        console.print(
+            Panel(
+                f"[bold yellow]DRY RUN:[/] Scanned [bold cyan]{len(cassette.entries)}[/] steps.\n"
+                f"Detected [bold red]{len(initial_leaks)}[/] leak categories.\n"
+                f"[dim]No changes were saved to {target}[/]",
+                title="🧹 Scrub Simulation",
+                border_style="yellow",
+            )
+        )
+        return
+
+    cassette.path = target
+    cassette.save()
+
+    console.print(
+        Panel(
+            f"[bold green]✔ Successfully scrubbed and re-signed cassette![/]\n"
+            f"[bold cyan]File:[/] {target}\n"
+            f"[bold cyan]Steps Scrubbed & Re-hashed:[/] {scrubbed_count}\n"
+            f"[bold cyan]Sensitive Leaks Neutralized:[/] {len(initial_leaks)}\n"
+            f"[dim]Cryptographic SHA-256 chain updated from GENESIS.[/]",
+            title="🧹 Cassette Scrubbed",
+            border_style="green",
+        )
+    )
 
 
 if __name__ == "__main__":

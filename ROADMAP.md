@@ -58,7 +58,7 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 - [ ] **Model Context Protocol (MCP) Replay**: Deterministically record and replay MCP tool invocations and server sessions
 - [ ] **Official GitHub Action (`rerunner-action`)**: Zero-config marketplace action for cassette caching and drift checks
 - [ ] **Drift & Cost Report in CI**: Detailed terminal and PR comment summary showing changed prompts and estimated token savings
-- [ ] **Cassette Scrub & Doctor CLI**: `rerunner doctor` and `rerunner scrub` commands to audit existing cassettes for secrets
+- [x] **Cassette Scrub & Doctor CLI**: `rerunner doctor` and `rerunner scrub` commands to audit existing cassettes for secrets and re-sign cryptographic integrity
 - [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets
 
 ---
