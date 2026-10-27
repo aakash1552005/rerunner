@@ -154,4 +154,5 @@ pythonpath = ["src", "."]
 asyncio_mode = "auto"
 markers = [
     "rerunner: mark test to record or replay using a rerunner cassette",
+    "asyncio: mark test as asyncio",
 ]

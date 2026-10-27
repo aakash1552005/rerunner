@@ -68,7 +68,9 @@ def test_cli_scrub_removes_secrets_and_rechains_integrity(tmp_path: Path) -> Non
     assert "SECURITY WARNING" in res_verify_fail.output
 
     # 2. Dry run does not write out changes
-    res_dry = runner.invoke(app, ["scrub", str(leaky_file), "--output", str(scrubbed_file), "--dry-run"])
+    res_dry = runner.invoke(
+        app, ["scrub", str(leaky_file), "--output", str(scrubbed_file), "--dry-run"]
+    )
     assert res_dry.exit_code == 0
     assert "DRY RUN" in res_dry.output
     assert not scrubbed_file.exists()

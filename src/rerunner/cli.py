@@ -508,9 +508,7 @@ def export_otel(
 @app.command()
 def doctor() -> None:
     """Run diagnostic checks on your environment, installed SDKs, and storage backends."""
-    table = Table(
-        title="🩺 Rerunner System Diagnostic", show_header=True, header_style="bold cyan"
-    )
+    table = Table(title="🩺 Rerunner System Diagnostic", show_header=True, header_style="bold cyan")
     table.add_column("Category", style="bold", width=14)
     table.add_column("Component", style="cyan", width=22)
     table.add_column("Status", width=14)
@@ -545,9 +543,7 @@ def doctor() -> None:
             __import__(pkg_name)
             table.add_row("Storage", label, "[bold green]✔ Available[/]", "Enabled")
         except ImportError:
-            table.add_row(
-                "Storage", label, "[dim yellow]○ Not installed[/]", "Optional backend"
-            )
+            table.add_row("Storage", label, "[dim yellow]○ Not installed[/]", "Optional backend")
 
     # 4. Agent & LLM SDKs
     for mod_name, label in [
@@ -625,6 +621,8 @@ def scrub(
         elif entry.entry_type in ("side_effect", "tool"):
             if entry.side_effect_args:
                 initial_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
+            if entry.side_effect_kwargs:
+                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_kwargs))
             if entry.side_effect_result:
                 initial_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
 
@@ -640,18 +638,14 @@ def scrub(
             entry.request.headers = sanitize_headers(entry.request.headers)
             try:
                 body_json = json.loads(entry.request.body)
-                entry.request.body = json.dumps(
-                    sanitize_payload(body_json), separators=(",", ":")
-                )
+                entry.request.body = json.dumps(sanitize_payload(body_json), separators=(",", ":"))
             except Exception:
                 entry.request.body = sanitize_string(entry.request.body)
 
             entry.response.headers = sanitize_headers(entry.response.headers)
             try:
                 body_json = json.loads(entry.response.body)
-                entry.response.body = json.dumps(
-                    sanitize_payload(body_json), separators=(",", ":")
-                )
+                entry.response.body = json.dumps(sanitize_payload(body_json), separators=(",", ":"))
             except Exception:
                 entry.response.body = sanitize_string(entry.response.body)
 
@@ -661,6 +655,8 @@ def scrub(
         elif entry.entry_type in ("side_effect", "tool"):
             if entry.side_effect_args:
                 entry.side_effect_args = sanitize_payload(entry.side_effect_args)
+            if entry.side_effect_kwargs:
+                entry.side_effect_kwargs = sanitize_payload(entry.side_effect_kwargs)
             if entry.side_effect_result:
                 entry.side_effect_result = sanitize_payload(entry.side_effect_result)
             scrubbed_count += 1
@@ -669,6 +665,8 @@ def scrub(
         entry.prev_hash = expected_prev
         entry.entry_hash = compute_entry_hash(entry, expected_prev)
         expected_prev = entry.entry_hash
+
+    cassette._last_hash = expected_prev
 
     target = output_path or cassette_path
 

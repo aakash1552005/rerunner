@@ -28,12 +28,7 @@ class Cassette:
     """
 
     def __init__(self, path: Path | str, metadata: CassetteMetadata | None = None) -> None:
-        self.uri = str(path)
-        self.path = (
-            Path(path)
-            if not (self.uri.startswith("s3://") or self.uri.startswith("gs://"))
-            else Path(self.uri.split("/")[-1])
-        )
+        self.set_destination(path)
         self.metadata = metadata or CassetteMetadata()
         self.entries: list[CassetteEntry] = []
         self._last_hash = "GENESIS"
@@ -41,6 +36,24 @@ class Cassette:
         self._tool_cursors: dict[str, int] = {}
         self._lock = threading.RLock()
         self._step_counter = 0
+
+    @property
+    def path(self) -> Path:
+        """Local filesystem path for the cassette, if applicable."""
+        return self._path
+
+    @path.setter
+    def path(self, new_path: Path | str) -> None:
+        self.set_destination(new_path)
+
+    def set_destination(self, path: Path | str) -> None:
+        """Update cassette target URI and local filesystem path."""
+        self.uri = str(path)
+        self._path = (
+            Path(path)
+            if not (self.uri.startswith("s3://") or self.uri.startswith("gs://"))
+            else Path(self.uri.split("/")[-1])
+        )
 
     @classmethod
     def load(cls, path: Path | str, verify_integrity: bool = True) -> Cassette:
@@ -147,9 +160,11 @@ class Cassette:
             self._request_cursors.clear()
             self._tool_cursors.clear()
 
-    def save(self) -> None:
+    def save(self, destination: Path | str | None = None) -> None:
         """Write the complete cassette to disk or remote storage atomically, supporting .zst, .gz, .jsonl, .json."""
         with self._lock:
+            if destination is not None:
+                self.set_destination(destination)
             backend = get_storage_backend(self.uri)
 
             # Assemble formatted payload
