@@ -32,7 +32,7 @@ def _hash_payload(data: Any) -> str:
     """Deterministic hash for MCP JSON-RPC arguments."""
     try:
         serialized = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
-    except Exception:
+    except Exception:  # nosec B110
         serialized = str(data)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
@@ -214,7 +214,7 @@ def record_mcp_tool(
                 bound = sig.bind(*args, **kwargs)
                 bound.apply_defaults()
                 tool_args = dict(bound.arguments)
-            except Exception:
+            except Exception:  # nosec B110
                 tool_args = kwargs or {"args": list(args)}
 
             client = RerunnerMCPClient(

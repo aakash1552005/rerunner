@@ -753,7 +753,7 @@ def cost(
                 elif entry.entry_type in ("side_effect", "tool"):
                     total_tools += 1
                     total_latency_ms += 350.0
-        except Exception:
+        except Exception:  # nosec B112
             continue
 
     # Blended estimate: $5.00 per 1M tokens average across modern frontier models
