@@ -99,6 +99,32 @@ For major architectural proposals, new protocols, or significant API additions, 
 2. **Community Discussion**: Gather input from maintainers and industry peers.
 3. **Implementation**: Once aligned, submit PRs referencing the RFC issue number.
 
+## 🗺️ Contributor Quest Board
+
+Ready to build? We have curated specific open-source quests across experience levels with clear guidance:
+
+### 🟢 Beginner Quests (Great First PRs)
+- **Quest 1: CrewAI Multi-Agent Flight Demo** (`docs`, `examples`)
+  - Create `examples/crewai_demo.py` showing how to record and replay a multi-agent debate or research task using Rerunner.
+- **Quest 2: CLI `--json` output format** (`cli`)
+  - Add `--json` flag to `rerunner inspect` and `rerunner cost` to allow downstream pipeline scripting and parsing.
+- **Quest 3: CLI shell completions** (`dx`)
+  - Add `rerunner --install-completion` for bash, zsh, and fish shells.
+
+### 🟡 Intermediate Quests (High Impact)
+- **Quest 4: LiteLLM Proxy Transport Adapter** (`ecosystem`)
+  - Add `wrap_litellm()` in `src/rerunner/integrations/litellm.py` so teams using LiteLLM proxy can record and replay with 1 line of code.
+- **Quest 5: Ollama Local Model Replayer** (`ecosystem`)
+  - Support recording local Ollama server calls (`http://localhost:11434`) and replaying them in CI without having an active GPU runner.
+- **Quest 6: Semantic Kernel Plugin Stubber** (`enterprise`)
+  - Enhance `wrap_semantic_kernel()` to intercept native kernel plugin functions with `@side_effect`.
+
+### 🔴 Advanced Quests (Core Innovation)
+- **Quest 7: Cassette-to-Eval Dataset Exporter** (`mlops`)
+  - Build `rerunner export-eval session.jsonl -o eval.jsonl` converting multi-step cassettes into golden benchmark datasets for OpenAI Evals and DeepEval.
+- **Quest 8: Embedding-Based Semantic Drift Warning** (`frontier`)
+  - Add tolerant matching that calculates prompt cosine similarity and warns in CI when prompt edits change intent beyond a threshold.
+
 ---
 
 ## How to Get Involved

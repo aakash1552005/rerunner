@@ -5,9 +5,10 @@
 **Deterministic flight recorder, replay engine, and CI test runner for AI agents.**
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
-[![Release](https://img.shields.io/badge/release-v0.2.1-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.0-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
 [![PyPI](https://img.shields.io/pypi/v/rerunner.svg)](https://pypi.org/project/rerunner/)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-ready-orange.svg)](action.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy%20strict-blue.svg)](https://mypy-lang.org/)
@@ -34,6 +35,38 @@
 
 ---
 
+## 🏗️ Architecture
+
+```text
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                            AGENT APPLICATION                                │
+  │    Claude Code · OpenAI · AutoGen · Semantic Kernel · LangGraph · MCP       │
+  └──────────────────────────────────────┬──────────────────────────────────────┘
+                                         │  (Zero-Touch Outbound Interception)
+                                         ▼
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │                       RERUNNER ENGINE & TRANSPORTS                          │
+  │     CassetteTransport · AsyncCassetteTransport · RerunnerMCPClient          │
+  └──────────────────┬───────────────────────────────────┬──────────────────────┘
+                     │ [RECORD MODE]                     │ [REPLAY MODE]
+                     ▼                                   ▼
+  ┌──────────────────────────────────────┐  ┌───────────────────────────────────┐
+  │         SECURITY & INTEGRITY         │  │       DETERMINISTIC RUNTIME       │
+  │  • PII & Luhn Credit Card Sanitizer  │  │  • 0ms Network Latency            │
+  │  • Presidio & SSN Redaction          │  │  • $0 API Token Costs             │
+  │  • Tamper-Evident SHA-256 Chaining   │  │  • Fail-Closed Side-Effect Guard  │
+  │  • HMAC-SHA256 Digital Signature     │  │  • Per-Key Cursor Replay Matching │
+  └──────────────────┬───────────────────┘  └───────────────────▲───────────────┘
+                     │                                          │
+                     ▼                                          │
+  ┌─────────────────────────────────────────────────────────────┴───────────────┐
+  │                      CASSETTE PERSISTENCE STORAGE                           │
+  │       Streaming JSONL · Zstandard (.zst) · Gzip (.gz) · AWS S3 · GCS        │
+  └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## ⚡ The Problem
 
 Testing production AI agents and running them in Continuous Integration (CI) creates major bottlenecks:
@@ -42,19 +75,22 @@ Testing production AI agents and running them in Continuous Integration (CI) cre
 2. **High API Costs**: Running an 8-step agent across dozens of CI runs drains thousands of dollars in LLM API credits.
 3. **Reproducibility & Debugging**: When an agent fails at **Step 5**, you cannot reproduce the bug locally without re-running Steps 1 through 4 live.
 
-**Rerunner** solves this by providing a lightweight cassette recorder that intercepts `httpx` traffic natively across the **Anthropic Claude SDK**, **OpenAI SDK**, **Google GenAI SDK**, and custom agent frameworks.
+**Rerunner** solves this by providing a lightweight cassette recorder that intercepts `httpx` traffic natively across the **Anthropic Claude SDK**, **OpenAI SDK**, **Google GenAI SDK**, **Model Context Protocol (MCP)**, **Microsoft AutoGen**, **Semantic Kernel**, and **LangChain / LangGraph**.
 
 ---
 
 ## 🚀 Key Features
 
 * **$0 CI Replays**: Record agent interactions to append-only JSONL cassettes and replay in CI with zero network latency and $0 token spend.
+* **Model Context Protocol (MCP) Replay**: Deterministically record and replay MCP tool invocations, prompts, and resources without launching local servers.
+* **Official GitHub Action**: Zero-config marketplace composite action (`aakash1552005/rerunner@main`) caching cassettes and reporting token savings directly on PRs.
+* **CI Token & Cost Estimator**: Built-in `rerunner cost` calculating avoided API dollar expenses and posting markdown summaries to `$GITHUB_STEP_SUMMARY`.
 * **Fork-from-Step Replay**: Replay steps 1..N from tape for free, and execute step N+1 live against the model with a modified prompt or code fix.
-* **Fail-Closed Side-Effect Guard**: The `@side_effect` decorator prevents destructive external actions (database updates, payments, webhooks) during replays, aborting immediately if an unrecorded side-effect is reached.
+* **Fail-Closed Side-Effect Guard**: The `@side_effect` decorator prevents destructive external actions (database updates, payments, webhooks) during replays.
 * **Per-Key Cursor Matching**: Accurately replays repeated identical requests and retry loops in recorded sequential order.
-* **Streaming SSE Replay**: Records `text/event-stream` chunks and replays token-by-token with optional simulated network latency (`chunk_delay_ms`).
-* **JSON-Safe Secret Redaction**: Automatically scrubs API keys (`sk-ant-...`, `sk-proj-...`, `AIza...`), Bearer tokens, and URL parameters while strictly preserving JSON syntax and numeric values (such as Unix timestamps).
-* **Tamper-Evident Integrity**: SHA-256 hash chaining detects accidental line edits, with optional HMAC-SHA256 digital signing via `RERUNNER_HMAC_KEY`.
+* **Streaming SSE Replay**: Records `text/event-stream` chunks and replays token-by-token with simulated network latency (`chunk_delay_ms`).
+* **JSON-Safe Secret Redaction**: Automatically scrubs API keys, Bearer tokens, emails, phone numbers, and SSNs while strictly preserving JSON syntax.
+* **Tamper-Evident Integrity**: SHA-256 hash chaining detects accidental line edits, with optional HMAC-SHA256 digital signing.
 * **Pytest Integration**: Seamless `@pytest.mark.rerunner` marker and `rerunner_transport` fixture.
 * **Pluggable Storage**: Store cassettes locally, in compressed formats (`.jsonl.gz`, `.jsonl.zst`), or directly in AWS S3 (`s3://`) and Google Cloud Storage (`gs://`).
 
@@ -235,13 +271,84 @@ client_claude = wrap_anthropic(anthropic.Anthropic(), "agent_run.jsonl", mode="r
 client_openai = wrap_openai(openai.OpenAI(), "agent_run.jsonl", mode="replay")
 ```
 
-### LangChain & LangGraph Integration
+### 1-Line Framework Adapters
+
+#### 🤖 Model Context Protocol (MCP) Replay
+Record and replay MCP tool invocations, prompts, and resources without spinning up local servers or subprocesses:
+
 ```python
+from rerunner.integrations import RerunnerMCPClient, record_mcp_tool
+
+# 1. Context manager for MCP tool calls
+with RerunnerMCPClient("cassettes/mcp_agent.jsonl", mode="replay") as mcp:
+    result = mcp.call_tool("read_file", {"path": "/workspace/data.json"})
+
+# 2. Or decorate Python functions as deterministic MCP tools
+@record_mcp_tool(name="fetch_weather")
+def fetch_weather(city: str) -> dict:
+    ...
+```
+
+#### 🤝 Microsoft AutoGen (AG2)
+```python
+from autogen import AssistantAgent
+from rerunner.integrations import wrap_autogen_agent
+
+assistant = AssistantAgent("assistant", llm_config=llm_config)
+wrap_autogen_agent(assistant, "cassettes/autogen_debate.jsonl", mode="replay")
+```
+
+#### 🧠 Microsoft Semantic Kernel
+```python
+import semantic_kernel as sk
+from rerunner.integrations import wrap_semantic_kernel
+
+kernel = sk.Kernel()
+# ... configure connectors ...
+wrap_semantic_kernel(kernel, "cassettes/sk_flight.jsonl", mode="replay")
+```
+
+#### 🦜️🔗 LangChain & LangGraph
+```python
+# Direct model wrapping
+from langchain_openai import ChatOpenAI
+from rerunner.integrations import wrap_langchain_model
+
+llm = wrap_langchain_model(ChatOpenAI(model="gpt-4o"), "cassettes/langgraph.jsonl", mode="replay")
+
+# Or callback handler for graph nodes
 from rerunner.integrations import RerunnerCallbackHandler
 
-handler = RerunnerCallbackHandler("langgraph_agent.jsonl", mode="replay")
-agent_executor.invoke({"input": "Fetch stock price"}, config={"callbacks": [handler]})
+handler = RerunnerCallbackHandler("cassettes/langgraph.jsonl", mode="replay")
+graph.invoke({"input": "research quantum computing"}, config={"callbacks": [handler]})
 ```
+
+---
+
+## ⚡ Official GitHub Action
+
+Add zero-latency deterministic caching and automated token savings reports to your GitHub Actions CI with 3 lines:
+
+```yaml
+- name: Checkout Code
+  uses: actions/checkout@v4
+
+- name: Rerunner CI Replay & Cache
+  uses: aakash1552005/rerunner@main
+  with:
+    cassette-dir: 'tests/cassettes'
+    report-savings: 'true'
+```
+
+Automatically renders an executive savings table directly on your GitHub Actions summary:
+
+| Metric | Offline Replay | Live API Estimate | Savings / Benefit |
+| :--- | :---: | :---: | :---: |
+| **Total Steps Replayed** | `124` | `124` | 100% Deterministic |
+| **HTTP / Model Calls** | `88` | `88` | Zero flaky fails |
+| **Tokens Replayed** | `142,500` | `142,500` | **100% Token Savings** |
+| **Estimated Cost** | **$0.00** | ~$0.7125 | **Saved ~$0.7125** |
+| **CI Execution Time** | **0.8s** | ~48.2s | **~47.4s Faster** |
 
 ---
 
@@ -261,34 +368,43 @@ Rerunner automatically redacts sensitive data before persisting cassettes:
 ## 💻 CLI Commands
 
 ```bash
-# Calculate CI cost reductions and token savings
-rerunner stats session.jsonl
+# Calculate CI cost reductions, token savings, and generate GitHub step summaries
+rerunner cost tests/cassettes --ci-summary
 
-# Visually play back agent execution steps in terminal
-rerunner play session.jsonl
+# Audit system dependencies, environment variables, and active transports
+rerunner doctor
 
-# Inspect cassette details and step sequences
+# Scrub secrets and re-sign cryptographic SHA-256 hash chains across existing cassettes
+rerunner scrub session.jsonl
+
+# Inspect cassette details, step sequences, and metadata
 rerunner inspect session.jsonl
 
-# Export cassette into OpenTelemetry OTLP trace format
-rerunner export-otel session.jsonl -o session.otel.json
+# Compare prompt and response divergences between two cassettes with drift detection
+rerunner diff session_v1.jsonl session_v2.jsonl --fail-on-drift
 
-# Verify cassette integrity
+# Verify cryptographic SHA-256 and HMAC-SHA256 integrity chains
 rerunner verify session.jsonl
 
-# Compare prompt and response divergences between two cassettes
-rerunner diff session_v1.jsonl session_v2.jsonl
+# Export cassette into OpenTelemetry (OTel) OTLP trace JSON format
+rerunner export-otel session.jsonl -o session.otel.json
+
+# Visually play back agent execution steps in terminal with Rich styling
+rerunner play session.jsonl
 ```
 
 ---
 
-## 🤝 Contributing
+## 🤝 Contributing & Community
 
-Contributions are welcomed:
-* 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and testing instructions.
+We are building a welcoming, world-class community for agent reliability and deterministic testing:
+
+* 🗺️ **[Contributor Quest Board](CONTRIBUTING.md#contributor-quest-board)**: Pick up beginner, intermediate, or advanced open-source quests.
+* 🛠️ **Developer Setup**: Read [CONTRIBUTING.md](CONTRIBUTING.md) for quick setup and testing guides.
 * 🏷️ **Starter Issues**: Look for tasks labeled [`good first issue`](https://github.com/aakash1552005/rerunner/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
-* 🗺️ **Roadmap**: Check [ROADMAP.md](ROADMAP.md) for upcoming milestones.
-* 📜 **Governance**: Review [GOVERNANCE.md](GOVERNANCE.md).
+* 🗺️ **Roadmap**: Check [ROADMAP.md](ROADMAP.md) for upcoming milestones and RFCs.
+* 📜 **Governance**: Review [GOVERNANCE.md](GOVERNANCE.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+* 🏆 **Contributor Hall of Fame**: Every merged PR is celebrated in [AUTHORS.md](AUTHORS.md) and official release notes!
 
 ---
 

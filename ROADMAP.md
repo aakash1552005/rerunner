@@ -10,8 +10,9 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 | :--- | :--- | :---: | :---: |
 | **v0.1.0** | Core Deterministic Replay Engine | ✅ **Shipped** | Foundation |
 | **v0.2.0** | SSE Streaming, Remote Stores & Integrations | ✅ **Shipped** | Core Ecosystem |
-| **v0.2.1** | Hardened Sanitizer, Fail-Closed Guards & Cursor Matching | 🔄 **Current** | Stability & Safety |
-| **v0.3.0** | MCP Protocol Replay & Official GitHub Action | ⏳ **Planned** | Next Up |
+| **v0.2.1** | Hardened Sanitizer, Fail-Closed Guards & Cursor Matching | ✅ **Shipped** | Stability & Safety |
+| **v0.3.0** | MCP Protocol Replay, Official GitHub Action & AutoGen/SK | 🔄 **Shipped** | Frontier Agent Infrastructure |
+| **v0.4.0** | Semantic Drift Detection & Eval Dataset Exporter | ⏳ **Planned** | Next Up |
 | **v1.0.0** | Centralized Replay Registry & Web Flight Deck | 🎯 **Long-Term** | Future Vision |
 
 ---
@@ -41,7 +42,7 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 
 ---
 
-## 🔄 v0.2.1 — Hardened Sanitizer & Replay Determinism (Current)
+## ✅ v0.2.1 — Hardened Sanitizer & Replay Determinism (Shipped)
 - [x] **JSON-Safe Secret Redactor**: Parse JSON bodies to scrub strings without corrupting numeric Unix timestamps or booleans
 - [x] **Luhn Check for Credit Cards**: Prevent false positives on 16-digit entity IDs
 - [x] **Per-Key Cursor Matching**: Accurately replay repeated identical requests and retry loops in recorded order
@@ -54,25 +55,35 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 
 ---
 
-## ⏳ v0.3.0 — MCP Protocol Replay & Official GitHub Action (Planned)
-- [ ] **Model Context Protocol (MCP) Replay**: Deterministically record and replay MCP tool invocations and server sessions
-- [ ] **Official GitHub Action (`rerunner-action`)**: Zero-config marketplace action for cassette caching and drift checks
-- [ ] **Drift & Cost Report in CI**: Detailed terminal and PR comment summary showing changed prompts and estimated token savings
+## 🚀 v0.3.0 — MCP Protocol Replay & Official GitHub Action (Shipped)
+- [x] **Model Context Protocol (MCP) Replay**: Deterministically record and replay MCP tool invocations and server sessions (`RerunnerMCPClient`, `@record_mcp_tool`)
+- [x] **Official GitHub Action (`action.yml`)**: Zero-config marketplace action for cassette caching, HMAC verification, and CI cost summaries
+- [x] **CI Cost & Token Savings CLI**: `rerunner cost` reporting exact prompt/completion tokens and avoided API spend to `$GITHUB_STEP_SUMMARY`
+- [x] **Microsoft AutoGen & Semantic Kernel Wrappers**: 1-line agent wrapping via `wrap_autogen_agent()` and `wrap_semantic_kernel()`
+- [x] **LangChain / LangGraph Model Direct Attachment**: `wrap_langchain_model()` attaching transports directly to chat models
+- [x] **Anthropic Message Batches Offline Mocker**: `mock_anthropic_batch_response()` for offline eval replay
+- [x] **Enterprise PII & Presidio Pipeline**: `sanitize_pii()` with US SSN and optional Presidio analyzer support
 - [x] **Cassette Scrub & Doctor CLI**: `rerunner doctor` and `rerunner scrub` commands to audit existing cassettes for secrets and re-sign cryptographic integrity
-- [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets
+
+---
+
+## ⏳ v0.4.0 — Semantic Drift Detection & Eval Exporter (Next Up)
+- [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets (JSONL, HuggingFace, Argilla)
+- [ ] **Semantic Drift Alerting**: Embedding-based tolerant matching to alert when prompt alterations diverge from cassette intent
+- [ ] **Real-Time Terminal TUI Flight Deck**: Terminal UI dashboard for live stepping through multi-agent interactions
 
 ---
 
 ## 🎯 v1.0.0 — Centralized Replay Registry & Web Flight Deck (Future Vision)
 - [ ] **Centralized Replay Registry**: Multi-developer cassette sharing with automatic versioning and CI deduplication
 - [ ] **Web Flight Deck UI**: Interactive browser visualizer for scrubbing through multi-step agent executions and tool calls
-- [ ] **Semantic Drift Detection**: Embedding-based tolerant matching to alert when prompt alterations diverge from cassette intent
+- [ ] **Automated Mock Synthesis**: Generate synthetic edge-case cassettes without making any live LLM calls
 
 ---
 
 ## 🤝 Contributing & Submitting RFCs
 
 We actively invite community contributions:
-1. For architectural proposals, open an [RFC (Request for Comments)](.github/ISSUE_TEMPLATE/rfc.yml).
-2. For starter tasks, check issues tagged [`good first issue`](https://github.com/aakash1552005/rerunner/labels/good%20first%20issue).
+1. Check the [Contributor Quest Board](CONTRIBUTING.md#contributor-quests) for starter and intermediate issues.
+2. For architectural proposals, open an [RFC (Request for Comments)](.github/ISSUE_TEMPLATE/rfc.yml).
 3. Review our [Contributing Guide](CONTRIBUTING.md) for code standards and setup instructions.

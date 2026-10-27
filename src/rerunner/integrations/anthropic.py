@@ -51,3 +51,31 @@ def wrap_anthropic(
             client._client = httpx.Client(transport=transport)  # type: ignore[arg-type]
 
     return client
+
+
+def mock_anthropic_batch_response(
+    batch_id: str = "msgbatch_test_123",
+    status: Literal["in_progress", "canceling", "ended"] = "ended",
+    total_requests: int = 1,
+    succeeded_requests: int = 1,
+) -> dict[str, Any]:
+    """Helper to generate a deterministic Anthropic Message Batch API JSON response for testing.
+
+    Resolves Issue #20: Enables immediate offline replay of Claude 3.5 Sonnet / Haiku
+    batch workloads in CI without waiting for background batch queue execution.
+    """
+    return {
+        "id": batch_id,
+        "type": "message_batch",
+        "processing_status": status,
+        "request_counts": {
+            "processing": 0 if status == "ended" else total_requests,
+            "succeeded": succeeded_requests if status == "ended" else 0,
+            "errored": 0,
+            "canceled": 0,
+            "expired": 0,
+        },
+        "ended_at": "2026-01-01T00:00:00Z" if status == "ended" else None,
+        "created_at": "2026-01-01T00:00:00Z",
+        "expires_at": "2026-01-02T00:00:00Z",
+    }

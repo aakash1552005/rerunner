@@ -1,0 +1,49 @@
+name: 'Rerunner CI Replay & Cost Reporter'
+description: 'Zero-latency deterministic test replayer, cassette cache, and token cost reporter for AI agents in CI.'
+author: 'AAKASH S S'
+
+branding:
+  icon: 'fast-forward'
+  color: 'blue'
+
+inputs:
+  cassette-dir:
+    description: 'Path to directory containing recorded agent cassettes'
+    required: false
+    default: 'tests/cassettes'
+  verify-integrity:
+    description: 'Verify cryptographic SHA-256 hash chaining across all cassettes'
+    required: false
+    default: 'true'
+  report-savings:
+    description: 'Post token savings, avoided API cost, and latency metrics to GitHub Step Summary'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cache Rerunner Cassettes
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.cassette-dir }}
+        key: rerunner-cassettes-${{ runner.os }}-${{ hashFiles(format('{0}/**', inputs.cassette-dir)) }}
+        restore-keys: |
+          rerunner-cassettes-${{ runner.os }}-
+
+    - name: Verify Cassette Cryptographic Integrity
+      if: inputs.verify-integrity == 'true'
+      shell: bash
+      run: |
+        if [ -d "${{ inputs.cassette-dir }}" ]; then
+          echo "Verifying cryptographic integrity for cassettes in ${{ inputs.cassette-dir }}..."
+          python -m rerunner.cli verify "${{ inputs.cassette-dir }}" || exit 1
+        fi
+
+    - name: Generate CI Replay Cost & Token Savings Report
+      if: inputs.report-savings == 'true'
+      shell: bash
+      run: |
+        if [ -d "${{ inputs.cassette-dir }}" ]; then
+          python -m rerunner.cli cost "${{ inputs.cassette-dir }}" --ci-summary
+        fi

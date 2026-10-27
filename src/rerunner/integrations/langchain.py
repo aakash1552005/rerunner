@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextvars
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from rerunner.side_effects import reset_active_cassette, set_active_cassette
 
 if TYPE_CHECKING:
@@ -63,3 +63,58 @@ class RerunnerCallbackHandler(BaseCallbackHandler):  # type: ignore[misc]
     def on_chain_end(self, outputs: dict[str, Any], **kwargs: Any) -> None:
         """Invoked when a chain completes execution."""
         pass
+
+
+def wrap_langchain_model(
+    model: Any,
+    cassette_path: str,
+    mode: Literal["record", "replay", "fork"] = "replay",
+    fork_step: int | None = None,
+) -> Any:
+    """Attach Rerunner cassette transports directly to a LangChain ChatModel or LLM instance.
+
+    Works across `ChatOpenAI`, `ChatAnthropic`, `ChatGoogleGenerativeAI`, and custom models
+    with `http_client` or `http_async_client` attributes.
+
+    Example:
+        from langchain_openai import ChatOpenAI
+        from rerunner.integrations.langchain import wrap_langchain_model
+
+        llm = wrap_langchain_model(ChatOpenAI(model="gpt-4o"), "cassettes/langchain.jsonl", mode="replay")
+        result = llm.invoke("Hello agent")
+    """
+    from rerunner.async_transport import AsyncCassetteTransport
+    from rerunner.transport import CassetteTransport
+    import httpx
+
+    sync_transport = CassetteTransport(cassette_path=cassette_path, mode=mode, fork_step=fork_step)
+    async_transport = AsyncCassetteTransport(
+        cassette_path=cassette_path, mode=mode, fork_step=fork_step
+    )
+
+    # Patch sync client if present
+    if hasattr(model, "http_client"):
+        if model.http_client is None:
+            model.http_client = httpx.Client(transport=sync_transport)
+        elif isinstance(model.http_client, httpx.Client):
+            model.http_client._transport = sync_transport
+            if hasattr(model.http_client, "_mounts"):
+                model.http_client._mounts.clear()
+
+    # Patch async client if present
+    if hasattr(model, "http_async_client"):
+        if model.http_async_client is None:
+            model.http_async_client = httpx.AsyncClient(transport=async_transport)
+        elif isinstance(model.http_async_client, httpx.AsyncClient):
+            model.http_async_client._transport = async_transport
+            if hasattr(model.http_async_client, "_mounts"):
+                model.http_async_client._mounts.clear()
+
+    # Check root client
+    if hasattr(model, "client") and hasattr(model.client, "_client"):
+        if isinstance(model.client._client, httpx.Client):
+            model.client._client._transport = sync_transport
+        elif isinstance(model.client._client, httpx.AsyncClient):
+            model.client._client._transport = async_transport
+
+    return model

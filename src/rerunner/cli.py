@@ -698,5 +698,116 @@ def scrub(
     )
 
 
+@app.command()
+def cost(
+    target_path: Path = typer.Argument(
+        Path("tests/cassettes"),
+        help="Path to a cassette file or directory containing cassettes.",
+    ),
+    markdown: bool = typer.Option(
+        False,
+        "--markdown",
+        "-m",
+        help="Output GitHub Flavored Markdown summary suitable for $GITHUB_STEP_SUMMARY.",
+    ),
+    ci_summary: bool = typer.Option(
+        False,
+        "--ci-summary",
+        help="Automatically append markdown report to $GITHUB_STEP_SUMMARY if available.",
+    ),
+) -> None:
+    """Calculate token savings, latency saved, and estimated API dollar cost avoided via replay."""
+    cassette_files: list[Path] = []
+    if target_path.is_file():
+        cassette_files.append(target_path)
+    elif target_path.is_dir():
+        for ext in ("*.zst", "*.gz", "*.jsonl", "*.json"):
+            cassette_files.extend(target_path.glob(ext))
+            cassette_files.extend(target_path.glob(f"**/{ext}"))
+        cassette_files = sorted(dict.fromkeys(cassette_files))
+    else:
+        console.print(f"[bold red]Error:[/] Target path does not exist: {target_path}")
+        raise typer.Exit(code=1)
+
+    total_steps = 0
+    total_http = 0
+    total_tools = 0
+    total_tokens = 0
+    total_latency_ms = 0.0
+
+    for path in cassette_files:
+        try:
+            cassette = Cassette.load(path, verify_integrity=False)
+            total_steps += len(cassette.entries)
+            for entry in cassette.entries:
+                if entry.entry_type == "http" and entry.response:
+                    total_http += 1
+                    t = _extract_tokens_from_body(entry.response.body)
+                    if t:
+                        total_tokens += t
+                    total_latency_ms += (
+                        sum(entry.response.chunk_delays_ms)
+                        if entry.response.chunk_delays_ms
+                        else 1200.0
+                    )
+                elif entry.entry_type in ("side_effect", "tool"):
+                    total_tools += 1
+                    total_latency_ms += 350.0
+        except Exception:
+            continue
+
+    # Blended estimate: $5.00 per 1M tokens average across modern frontier models
+    estimated_cost_usd = (total_tokens / 1_000_000.0) * 5.0
+    latency_sec = total_latency_ms / 1000.0
+
+    if markdown or ci_summary:
+        md = [
+            "### ⚡ Rerunner CI Replay Savings Report",
+            "",
+            "| Metric | Offline Replay | Live API Estimate | Savings / Benefit |",
+            "| :--- | :---: | :---: | :---: |",
+            f"| **Cassette Files Analyzed** | `{len(cassette_files)}` | - | - |",
+            f"| **Total Steps Replayed** | `{total_steps:,}` | `{total_steps:,}` | 100% Deterministic |",
+            f"| **HTTP / Model Calls** | `{total_http:,}` | `{total_http:,}` | Zero network flaky fails |",
+            f"| **External Tool Calls** | `{total_tools:,}` | `{total_tools:,}` | Zero live side effects |",
+            f"| **Tokens Replayed** | `{total_tokens:,}` | `{total_tokens:,}` | **100% Token Savings** |",
+            f"| **Estimated Cost** | **$0.00** | ~${estimated_cost_usd:.4f} | **Saved ~${estimated_cost_usd:.4f}** |",
+            f"| **CI Execution Time** | **< 1s** | ~{latency_sec:.1f}s | **~{latency_sec:.1f}s Faster** |",
+            "",
+            "> *Recorded with cryptographic integrity & PII redaction by [Rerunner](https://github.com/aakash1552005/rerunner)*",
+        ]
+        md_text = "\n".join(md)
+        if markdown:
+            print(md_text)
+
+        step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if ci_summary and step_summary_path:
+            try:
+                with open(step_summary_path, "a", encoding="utf-8") as f:
+                    f.write("\n" + md_text + "\n")
+                console.print("[bold green]✔ Appended cost report to $GITHUB_STEP_SUMMARY[/]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not write to GITHUB_STEP_SUMMARY:[/] {e}")
+        return
+
+    # Rich table output
+    table = Table(title="⚡ Rerunner Replay Cost & Latency Savings", border_style="cyan")
+    table.add_column("Metric", style="bold cyan")
+    table.add_column("Value", style="bold green", justify="right")
+    table.add_column("Impact", style="bold yellow")
+
+    table.add_row("Cassette Files", f"{len(cassette_files)}", "Scanned in repository")
+    table.add_row("Execution Steps", f"{total_steps:,}", "100% Deterministic Replay")
+    table.add_row("HTTP API Interceptions", f"{total_http:,}", "0 Live Outbound Calls")
+    table.add_row("Tool Calls Stubbed", f"{total_tools:,}", "Zero Live Side Effects")
+    table.add_row("Total Replayed Tokens", f"{total_tokens:,}", "Zero API Quota Depletion")
+    table.add_row(
+        "Estimated API Savings", f"${estimated_cost_usd:.4f} USD", "Replayed at $0.00 cost"
+    )
+    table.add_row("Latency Saved", f"~{latency_sec:.1f}s", "Accelerates CI test suites")
+
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()

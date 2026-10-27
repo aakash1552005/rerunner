@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from pathlib import Path
 import httpx
 import pytest
-from pathlib import Path
 
 
 class MockRealTransport(httpx.BaseTransport):
@@ -52,3 +53,12 @@ def mock_async_transport() -> MockAsyncRealTransport:
 @pytest.fixture
 def temp_cassette_path(tmp_path: Path) -> Path:
     return tmp_path / "test_session.jsonl"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rerunner_context() -> Generator[None, None, None]:
+    """Ensure contextvars are never leaked between tests in the suite."""
+    from rerunner.side_effects import set_active_cassette
+
+    yield
+    set_active_cassette(None)

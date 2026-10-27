@@ -36,6 +36,11 @@ SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"\b(?:\+?1[-. ]?)?\(?([0-9]{3})\)?[-. ]([0-9]{3})[-. ]([0-9]{4})\b"),
         "[REDACTED_PHONE]",
     ),
+    (
+        # US Social Security Number (SSN)
+        re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+        "[REDACTED_SSN]",
+    ),
 ]
 
 # Sensitive header keys that should always have their values scrubbed
@@ -304,3 +309,43 @@ def find_sensitive_leaks(
                     leaks.append(f"Found unredacted pattern matching {replacement.strip('[]')}")
 
     return list(dict.fromkeys(leaks))
+
+
+def sanitize_pii(
+    text: str,
+    entities: list[str] | None = None,
+) -> str:
+    """Scrub Personally Identifiable Information (PII) from string or JSON text.
+
+    Supports Microsoft Presidio (`presidio-analyzer` & `presidio-anonymizer`) if installed.
+    Gracefully falls back to high-speed compiled regex scrubbers (email, phone, credit card, SSN, IP)
+    with zero mandatory third-party dependencies.
+
+    Resolves Issue #12.
+    """
+    if not text:
+        return text
+
+    target_entities = entities or [
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "CREDIT_CARD",
+        "US_SSN",
+        "IP_ADDRESS",
+    ]
+
+    # Try Presidio if available
+    try:
+        from presidio_analyzer import AnalyzerEngine
+        from presidio_anonymizer import AnonymizerEngine
+
+        analyzer = AnalyzerEngine()
+        anonymizer = AnonymizerEngine()
+        results = analyzer.analyze(text=text, entities=target_entities, language="en")
+        anonymized = anonymizer.anonymize(text=text, analyzer_results=results)
+        return str(anonymized.text)
+    except ImportError:
+        pass
+
+    # High-speed fallback
+    return sanitize_string(text)
