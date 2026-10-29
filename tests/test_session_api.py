@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import httpx
 
-from rerunner import CassetteMissingError, Session, fork, record, replay
+from rerunner import CassetteMissingError, Session, SessionContext, fork, record, replay
 
 
 def _mock_handler(request: httpx.Request) -> httpx.Response:
@@ -123,3 +123,28 @@ async def test_async_session_context_manager(tmp_path: Path) -> None:
         resp = await client.get("https://api.example.com/async")
         assert resp.status_code == 200
         assert resp.json()["async"] is True
+
+
+def test_session_forwards_pii_redactor_to_transports(tmp_path: Path) -> None:
+    class _MarkerRedactor:
+        def redact(self, text: str) -> str:
+            return text.replace("ticket-7781", "[REDACTED_TICKET]")
+
+    cassette_file = tmp_path / "redacted.jsonl"
+    redactor = _MarkerRedactor()
+
+    with record(cassette_file, pii_redactor=redactor) as session:
+        assert session.transport.pii_redactor is redactor
+        assert session.async_transport.pii_redactor is redactor
+        assert SessionContext(session.transport).async_transport.pii_redactor is redactor
+        session.transport.real_transport = httpx.MockTransport(_mock_handler)
+        client = session.get_client()
+        resp = client.post("https://api.example.com/test", json={"ref": "ticket-7781"})
+        assert resp.status_code == 200
+
+    raw = cassette_file.read_bytes()
+    assert b"ticket-7781" not in raw
+    assert b"[REDACTED_TICKET]" in raw
+
+    with fork(cassette_file, step=1, pii_redactor=redactor) as session:
+        assert session.transport.pii_redactor is redactor

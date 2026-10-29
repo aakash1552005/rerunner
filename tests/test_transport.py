@@ -72,3 +72,78 @@ async def test_async_record_and_replay(temp_cassette_path: Path, mock_async_tran
         assert replayed_resp.status_code == 200
         assert "Async Hello" in replayed_resp.text
         assert mock_async_transport.call_count == 1
+
+
+class _MarkerRedactor:
+    """Minimal pii_redactor stub so transport wiring is testable without optional packages."""
+
+    def redact(self, text: str) -> str:
+        return text.replace("ticket-7781", "[REDACTED_TICKET]")
+
+
+def test_sync_pii_redactor_applies_before_persisting(
+    temp_cassette_path: Path, mock_transport: Any
+) -> None:
+    record_transport = CassetteTransport(
+        cassette_path=temp_cassette_path,
+        mode="record",
+        real_transport=mock_transport,
+        pii_redactor=_MarkerRedactor(),
+    )
+    with httpx.Client(transport=record_transport) as client:
+        resp = client.post(
+            "https://api.openai.com/v1/chat/completions", json={"prompt": "ticket-7781"}
+        )
+        assert resp.status_code == 200
+
+    raw = temp_cassette_path.read_bytes()
+    assert b"ticket-7781" not in raw
+    assert b"[REDACTED_TICKET]" in raw
+
+    # Replay matches on the raw request, so redaction never affects cassette lookup
+    replay_transport = CassetteTransport(
+        cassette_path=temp_cassette_path,
+        mode="replay",
+        real_transport=mock_transport,
+    )
+    with httpx.Client(transport=replay_transport) as client:
+        replayed_resp = client.post(
+            "https://api.openai.com/v1/chat/completions", json={"prompt": "ticket-7781"}
+        )
+        assert replayed_resp.status_code == 200
+        assert mock_transport.call_count == 1
+
+
+def test_sync_recording_is_unchanged_without_pii_redactor(
+    temp_cassette_path: Path, mock_transport: Any
+) -> None:
+    record_transport = CassetteTransport(
+        cassette_path=temp_cassette_path,
+        mode="record",
+        real_transport=mock_transport,
+    )
+    with httpx.Client(transport=record_transport) as client:
+        client.post("https://api.openai.com/v1/chat/completions", json={"prompt": "ticket-7781"})
+
+    assert b"ticket-7781" in temp_cassette_path.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_async_pii_redactor_applies_before_persisting(
+    temp_cassette_path: Path, mock_async_transport: Any
+) -> None:
+    record_transport = AsyncCassetteTransport(
+        cassette_path=temp_cassette_path,
+        mode="record",
+        real_transport=mock_async_transport,
+        pii_redactor=_MarkerRedactor(),
+    )
+    async with httpx.AsyncClient(transport=record_transport) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages", json={"prompt": "ticket-7781"}
+        )
+        assert resp.status_code == 200
+
+    raw = temp_cassette_path.read_bytes()
+    assert b"ticket-7781" not in raw
+    assert b"[REDACTED_TICKET]" in raw
