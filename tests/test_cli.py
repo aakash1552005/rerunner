@@ -79,3 +79,29 @@ def test_cli_verify_detects_leaked_secret(tmp_path: Path) -> None:
     result_non_strict = runner.invoke(app, ["verify", str(leaky_cassette), "--no-strict"])
     assert result_non_strict.exit_code == 0
     assert "SECURITY WARNING" in result_non_strict.output
+
+
+def test_cli_tui_render(temp_cassette_path: Path) -> None:
+    from rerunner.cassette import Cassette
+    from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+    cassette = Cassette(temp_cassette_path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST", url="https://api.openai.com/v1/chat/completions", headers={}
+            ),
+            response=RecordedResponse(
+                status_code=200, headers={}, body='{"usage": {"total_tokens": 42}}'
+            ),
+        )
+    )
+    cassette.save()
+
+    result = runner.invoke(app, ["tui", str(temp_cassette_path)])
+    assert result.exit_code == 0
+    assert "RERUNNER AGENT FLIGHT DECK" in result.output
+    assert "Step 1" in result.output
+    assert "Tokens Replayed: 42" in result.output
