@@ -283,10 +283,10 @@ from rerunner.integrations import RerunnerMCPClient, record_mcp_tool
 with RerunnerMCPClient("cassettes/mcp_agent.jsonl", mode="replay") as mcp:
     result = mcp.call_tool("read_file", {"path": "/workspace/data.json"})
 
+
 # 2. Or decorate Python functions as deterministic MCP tools
 @record_mcp_tool(name="fetch_weather")
-def fetch_weather(city: str) -> dict:
-    ...
+def fetch_weather(city: str) -> dict: ...
 ```
 
 #### 🤝 Microsoft AutoGen (AG2)

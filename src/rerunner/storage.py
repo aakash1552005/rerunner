@@ -266,10 +266,103 @@ class GCSStorageBackend(BaseStorageBackend):
             ) from exc
 
 
+class AzureBlobStorageBackend(BaseStorageBackend):
+    """Microsoft Azure Blob Storage cassette backend (requires azure-storage-blob)."""
+
+    def __init__(self, blob_service_client: object | None = None) -> None:
+        self._client = blob_service_client
+
+    def _get_client(self) -> object:
+        if self._client is None:
+            try:
+                from azure.storage.blob import BlobServiceClient  # type: ignore[import-untyped]
+
+                connection_string = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+                account_url = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
+                if connection_string:
+                    self._client = BlobServiceClient.from_connection_string(connection_string)
+                elif account_url:
+                    self._client = BlobServiceClient(account_url=account_url)
+                else:
+                    raise StorageBackendError(
+                        "Azure Blob Storage requires AZURE_STORAGE_CONNECTION_STRING or "
+                        "AZURE_STORAGE_ACCOUNT_URL environment variable to be set."
+                    )
+            except ImportError as err:
+                raise StorageBackendError(
+                    "azure-storage-blob is required for Azure remote cassette storage. "
+                    "Install it via `pip install rerunner[azure]` or `pip install azure-storage-blob`."
+                ) from err
+        return self._client
+
+    def _parse_azure_uri(self, uri: str) -> tuple[str, str]:
+        parsed = urlparse(uri)
+        if parsed.scheme not in ("az", "azure") or not parsed.netloc:
+            raise StorageBackendError(
+                f"Invalid Azure Blob URI format: '{uri}'. Expected 'az://container/blob_name' or 'azure://container/blob_name'"
+            )
+        container = parsed.netloc
+        blob_name = parsed.path.lstrip("/")
+        return container, blob_name
+
+    def read_bytes(self, uri: str) -> bytes:
+        container_name, blob_name = self._parse_azure_uri(uri)
+        client: Any = self._get_client()
+        try:
+            container_client = client.get_container_client(container_name)
+            blob_client = container_client.get_blob_client(blob_name)
+            return blob_client.download_blob().readall()  # type: ignore[no-any-return]
+        except Exception as exc:
+            raise StorageBackendError(
+                f"Failed to read cassette from Azure URI '{uri}': {exc}"
+            ) from exc
+
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        container_name, blob_name = self._parse_azure_uri(uri)
+        client: Any = self._get_client()
+        try:
+            container_client = client.get_container_client(container_name)
+            blob_client = container_client.get_blob_client(blob_name)
+            blob_client.upload_blob(data, overwrite=True)
+        except Exception as exc:
+            raise StorageBackendError(
+                f"Failed to write cassette to Azure URI '{uri}': {exc}"
+            ) from exc
+
+    def exists(self, uri: str) -> bool:
+        container_name, blob_name = self._parse_azure_uri(uri)
+        client: Any = self._get_client()
+        try:
+            container_client = client.get_container_client(container_name)
+            blob_client = container_client.get_blob_client(blob_name)
+            return blob_client.exists()  # type: ignore[no-any-return]
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "404" in err_str or "not found" in err_str or "blobnotfound" in err_str:
+                return False
+            raise StorageBackendError(
+                f"Error checking existence of Azure cassette '{uri}': {exc}"
+            ) from exc
+
+    def delete(self, uri: str) -> None:
+        container_name, blob_name = self._parse_azure_uri(uri)
+        client: Any = self._get_client()
+        try:
+            container_client = client.get_container_client(container_name)
+            blob_client = container_client.get_blob_client(blob_name)
+            blob_client.delete_blob()
+        except Exception as exc:
+            raise StorageBackendError(
+                f"Failed to delete cassette at Azure URI '{uri}': {exc}"
+            ) from exc
+
+
 def get_storage_backend(uri: str) -> BaseStorageBackend:
     """Resolve the appropriate storage backend based on URI scheme."""
     if uri.startswith("s3://"):
         return S3StorageBackend()
     if uri.startswith("gs://"):
         return GCSStorageBackend()
+    if uri.startswith("az://") or uri.startswith("azure://"):
+        return AzureBlobStorageBackend()
     return LocalStorageBackend()
