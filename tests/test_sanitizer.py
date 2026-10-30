@@ -221,3 +221,43 @@ def test_sanitize_chunks_applies_custom_patterns_across_boundaries() -> None:
 def test_sanitize_chunks_keeps_count_when_replacement_grows() -> None:
     custom = [(re.compile(r"abc"), "abcd")]
     assert sanitize_chunks(["ab", "c"], custom_patterns=custom) == ["ab", "cd"]
+
+
+def test_sanitize_payload_keeps_records_when_keys_collide() -> None:
+    payload = {
+        "ops@acme.org": {"id": 1},
+        "sales@acme.org": {"id": 2},
+        "support@acme.org": 3,
+        "status": "open",
+    }
+    assert sanitize_payload(payload) == {
+        "[REDACTED_EMAIL]": {"id": 1},
+        "[REDACTED_EMAIL]#2": {"id": 2},
+        "[REDACTED_EMAIL]#3": 3,
+        "status": "open",
+    }
+
+
+def test_sanitize_payload_suffix_never_takes_an_existing_key_name() -> None:
+    literal_first = {"[REDACTED_EMAIL]#2": "literal", "ops@acme.org": 1, "sales@acme.org": 2}
+    assert sanitize_payload(literal_first) == {
+        "[REDACTED_EMAIL]#2": "literal",
+        "[REDACTED_EMAIL]": 1,
+        "[REDACTED_EMAIL]#3": 2,
+    }
+
+    literal_last = {"ops@acme.org": 1, "sales@acme.org": 2, "[REDACTED_EMAIL]#2": "literal"}
+    assert sanitize_payload(literal_last) == {
+        "[REDACTED_EMAIL]": 1,
+        "[REDACTED_EMAIL]#3": 2,
+        "[REDACTED_EMAIL]#2": "literal",
+    }
+
+
+def test_sanitize_body_keeps_nested_records_when_keys_collide() -> None:
+    body = json.dumps({"users": {"ops@acme.org": {"id": 1}, "sales@acme.org": {"id": 2}}})
+    cleaned = sanitize_body(body)
+    assert "acme.org" not in cleaned
+    assert json.loads(cleaned) == {
+        "users": {"[REDACTED_EMAIL]": {"id": 1}, "[REDACTED_EMAIL]#2": {"id": 2}}
+    }

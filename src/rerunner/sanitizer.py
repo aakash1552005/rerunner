@@ -246,13 +246,22 @@ def sanitize_payload(
     if isinstance(data, str):
         return sanitize_string(data, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
     if isinstance(data, dict):
+        cleaned_keys = [
+            sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            if isinstance(k, str)
+            else k
+            for k in data
+        ]
+        # Names of keys that are not redacted are reserved so a suffix never takes one of them
+        reserved = {clean_k for k, clean_k in zip(data, cleaned_keys, strict=True) if clean_k == k}
         result: dict[Any, Any] = {}
-        for k, v in data.items():
-            clean_k = (
-                sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
-                if isinstance(k, str)
-                else k
-            )
+        for (k, v), clean_k in zip(data.items(), cleaned_keys, strict=True):
+            # Keep every record when two keys sanitize to the same placeholder
+            if clean_k in result or (clean_k != k and clean_k in reserved):
+                suffix = 2
+                while f"{clean_k}#{suffix}" in result or f"{clean_k}#{suffix}" in reserved:
+                    suffix += 1
+                clean_k = f"{clean_k}#{suffix}"
             # If the key is specifically version/semver, do not redact the value as an IP
             if (
                 isinstance(k, str)
