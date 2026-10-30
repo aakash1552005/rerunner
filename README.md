@@ -5,7 +5,7 @@
 **Deterministic flight recorder, replay engine, and CI test runner for AI agents.**
 
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/aakash1552005/rerunner/actions)
-[![Release](https://img.shields.io/badge/release-v0.3.0-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.1-blue.svg)](https://github.com/aakash1552005/rerunner/releases)
 [![PyPI](https://img.shields.io/pypi/v/rerunner.svg)](https://pypi.org/project/rerunner/)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-ready-orange.svg)](action.yml)
@@ -92,7 +92,8 @@ Testing production AI agents and running them in Continuous Integration (CI) cre
 * **JSON-Safe Secret Redaction**: Automatically scrubs API keys, Bearer tokens, emails, phone numbers, and SSNs while strictly preserving JSON syntax.
 * **Tamper-Evident Integrity**: SHA-256 hash chaining detects accidental line edits, with optional HMAC-SHA256 digital signing.
 * **Pytest Integration**: Seamless `@pytest.mark.rerunner` marker and `rerunner_transport` fixture.
-* **Pluggable Storage**: Store cassettes locally, in compressed formats (`.jsonl.gz`, `.jsonl.zst`), or directly in AWS S3 (`s3://`) and Google Cloud Storage (`gs://`).
+* **Pluggable Remote Storage**: Store cassettes locally, in compressed formats (`.jsonl.gz`, `.jsonl.zst`), or directly in AWS S3 (`s3://`), Google Cloud Storage (`gs://`), and Microsoft Azure Blob Storage (`az://`, `azure://`).
+* **Interactive Terminal Flight Deck**: Visually scrub and inspect multi-turn agent execution steps, tokens, and cryptographic security audits via `rerunner tui`.
 
 ---
 
@@ -105,7 +106,7 @@ Testing production AI agents and running them in Continuous Integration (CI) cre
 | **Fork-from-Step Execution** | ✅ **Replay 1..N, execute live from N+1** | ❌ No | ❌ No | ⚠️ Subgraph re-execution |
 | **Fail-Closed Side-Effect Guard** | ✅ **Yes (`@side_effect`)** | ❌ No | ❌ No | ❌ No |
 | **Secret & URL Redaction** | ✅ **Built-in JSON & URL redactor** | ⚠️ Custom filter functions | ❌ No | ❌ No |
-| **Zero Cloud Infrastructure** | ✅ **Local JSONL / S3 / GCS** | ✅ Local YAML | ✅ In-memory | ⚠️ Postgres / Redis required |
+| **Pluggable Cloud Storage** | ✅ **Local, S3, GCS, Azure Blob** | ✅ Local YAML | ✅ In-memory | ⚠️ Postgres / Redis required |
 | **Framework Agnostic** | ✅ **Any HTTPX-based SDK** | ✅ HTTP socket level | ✅ HTTPX | ❌ Locked to LangGraph |
 
 ---
@@ -283,10 +284,10 @@ from rerunner.integrations import RerunnerMCPClient, record_mcp_tool
 with RerunnerMCPClient("cassettes/mcp_agent.jsonl", mode="replay") as mcp:
     result = mcp.call_tool("read_file", {"path": "/workspace/data.json"})
 
+
 # 2. Or decorate Python functions as deterministic MCP tools
 @record_mcp_tool(name="fetch_weather")
-def fetch_weather(city: str) -> dict:
-    ...
+def fetch_weather(city: str) -> dict: ...
 ```
 
 #### 🤝 Microsoft AutoGen (AG2)
@@ -306,6 +307,14 @@ from rerunner.integrations import wrap_semantic_kernel
 kernel = sk.Kernel()
 # ... configure connectors ...
 wrap_semantic_kernel(kernel, "cassettes/sk_flight.jsonl", mode="replay")
+```
+
+#### 🛡️ AWS Bedrock
+```python
+from rerunner.integrations import wrap_bedrock_client
+
+# Direct HTTP client configured for Amazon Bedrock
+client = wrap_bedrock_client(bedrock_client, "cassettes/bedrock.jsonl", mode="replay")
 ```
 
 #### 🦜️🔗 LangChain & LangGraph
@@ -400,6 +409,9 @@ rerunner doctor
 
 # Scrub secrets and re-sign cryptographic SHA-256 hash chains across existing cassettes
 rerunner scrub session.jsonl
+
+# Launch interactive terminal flight deck to visually inspect multi-turn agent steps
+rerunner tui session.jsonl
 
 # Inspect cassette details, step sequences, and metadata
 rerunner inspect session.jsonl

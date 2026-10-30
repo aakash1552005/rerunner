@@ -100,3 +100,43 @@ def test_gcs_storage_backend_mocked() -> None:
     # Test delete
     backend.delete(uri)
     mock_blob.delete.assert_called_once()
+
+
+def test_azure_blob_storage_backend_mocked() -> None:
+    from rerunner.storage import AzureBlobStorageBackend, get_storage_backend
+
+    mock_blob_service = MagicMock()
+    mock_container = MagicMock()
+    mock_blob = MagicMock()
+    mock_download = MagicMock()
+    mock_download.readall.return_value = b'{"format_version": "0.1"}\n'
+    mock_blob.download_blob.return_value = mock_download
+    mock_blob.exists.return_value = True
+    mock_container.get_blob_client.return_value = mock_blob
+    mock_blob_service.get_container_client.return_value = mock_container
+
+    backend = AzureBlobStorageBackend(blob_service_client=mock_blob_service)
+    uri = "az://cassettes/agent_run.jsonl"
+
+    # Test read
+    data = backend.read_bytes(uri)
+    assert data == b'{"format_version": "0.1"}\n'
+    mock_blob_service.get_container_client.assert_called_once_with("cassettes")
+    mock_container.get_blob_client.assert_called_once_with("agent_run.jsonl")
+
+    # Test write
+    backend.write_bytes(uri, b"azure_payload")
+    mock_blob.upload_blob.assert_called_once_with(b"azure_payload", overwrite=True)
+
+    # Test exists
+    assert backend.exists(uri) is True
+
+    # Test delete
+    backend.delete(uri)
+    mock_blob.delete_blob.assert_called_once()
+
+    # Test get_storage_backend resolution
+    assert isinstance(get_storage_backend("az://mycontainer/path.jsonl"), AzureBlobStorageBackend)
+    assert isinstance(
+        get_storage_backend("azure://mycontainer/path.jsonl"), AzureBlobStorageBackend
+    )

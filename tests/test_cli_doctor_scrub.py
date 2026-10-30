@@ -90,6 +90,8 @@ def test_cli_scrub_removes_secrets_and_rechains_integrity(tmp_path: Path) -> Non
     # 5. Load and confirm content scrubbing & valid hash chaining
     scrubbed = Cassette.load(scrubbed_file)
     assert len(scrubbed.entries) == 2
+    assert scrubbed.entries[0].request is not None
+    assert scrubbed.entries[0].response is not None
     assert scrubbed.entries[0].request.headers["authorization"] == "[REDACTED]"
     assert scrubbed.entries[0].request.headers["x-api-key"] == "[REDACTED]"
     assert "[REDACTED_EMAIL]" in scrubbed.entries[0].request.body

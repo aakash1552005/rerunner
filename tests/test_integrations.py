@@ -106,3 +106,21 @@ def test_callback_handlers_context_manager_and_cleanup(temp_cassette_path: Path)
         assert llama_h.event_count == 1
 
     assert get_active_cassette() is None
+
+
+def test_wrap_bedrock_client(temp_cassette_path: Path) -> None:
+    from rerunner.integrations.bedrock import mock_bedrock_converse_response, wrap_bedrock_client
+
+    client = DummyClient()
+    wrapped = wrap_bedrock_client(client, temp_cassette_path, mode="record")
+    assert hasattr(wrapped._client, "_transport")
+
+    mock_resp = mock_bedrock_converse_response(
+        text="All tests passed deterministically.", input_tokens=10, output_tokens=20
+    )
+    assert (
+        mock_resp["output"]["message"]["content"][0]["text"]
+        == "All tests passed deterministically."
+    )
+    assert mock_resp["usage"]["totalTokens"] == 30
+    assert mock_resp["stopReason"] == "end_turn"
