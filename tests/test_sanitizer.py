@@ -223,6 +223,52 @@ def test_sanitize_chunks_keeps_count_when_replacement_grows() -> None:
     assert sanitize_chunks(["ab", "c"], custom_patterns=custom) == ["ab", "cd"]
 
 
+def test_sanitize_chunks_may_place_placeholder_before_value_completes() -> None:
+    # "alice@example.co" is already a valid email, so the placeholder lands one chunk early
+    chunks = ["mail alice@example.co", "m", " done"]
+    assert sanitize_chunks(chunks) == ["mail [REDACTED_EMAIL]", "", " done"]
+
+
+def test_sanitize_chunks_keeps_pattern_context_from_earlier_chunks() -> None:
+    chunks = ["Bearer", " ", "abcdefghijklmnopqrst", "uvwxyz ok"]
+    assert sanitize_chunks(chunks) == ["Bearer", " ", "[REDACTED_TOKEN]", " ok"]
+
+
+def test_sanitize_chunks_keeps_boundary_context_from_earlier_chunks() -> None:
+    # Glued to "ref" the digits are not a card, and the rescan must see that context
+    chunks = ["ref", "4111 1111 1111 1111", " ok"]
+    assert sanitize_chunks(chunks) == chunks
+
+
+class _CountingRedactor:
+    """pii_redactor stub that records how much text it is asked to scan."""
+
+    def __init__(self) -> None:
+        self.scanned = 0
+
+    def redact(self, text: str) -> str:
+        self.scanned += len(text)
+        return text
+
+
+def test_sanitize_chunks_rescans_a_bounded_amount_of_text() -> None:
+    chunks: list[str] = []
+    for index in range(800):
+        chunks.extend([f'data: {{"email":"user{index}@', 'example.org"}\n\n'])
+    chunks.append("data: [DONE]\n\n")
+    joined = "".join(chunks)
+    redactor = _CountingRedactor()
+
+    cleaned = sanitize_chunks(chunks, pii_redactor=redactor)
+
+    assert "".join(cleaned) == sanitize_string(joined)
+    assert len(cleaned) == len(chunks)
+    assert cleaned[14:16] == ['data: {"email":"', '[REDACTED_EMAIL]"}\n\n']
+    # Every chunk once, the joined text once, and settling that only looks back to the last
+    # boundary known to line up. Rescanning from the start would scan hundreds of times more.
+    assert redactor.scanned <= 5 * len(joined)
+
+
 def test_sanitize_payload_keeps_records_when_keys_collide() -> None:
     payload = {
         "ops@acme.org": {"id": 1},

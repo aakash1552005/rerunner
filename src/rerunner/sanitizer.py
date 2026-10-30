@@ -315,10 +315,22 @@ def sanitize_body(
     return sanitize_string(body, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
 
 
+# Literal characters kept in front of a settling rescan so boundary assertions see context
+_SETTLE_CONTEXT = 64
+
+
 def _common_prefix_length(left: str, right: str) -> int:
     limit = min(len(left), len(right))
     index = 0
     while index < limit and left[index] == right[index]:
+        index += 1
+    return index
+
+
+def _common_suffix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[-1 - index] == right[-1 - index]:
         index += 1
     return index
 
@@ -334,9 +346,14 @@ def sanitize_chunks(
     sanitizing the joined text they are returned unchanged. Otherwise the chunks are re-cut
     against the jointly sanitized text: a chunk that matches it at the current position is
     kept as is, and a chunk that does not is given only the part of the joint result settled
-    by the text up to and including it. A placeholder therefore lands in the chunk where the
-    value completed, earlier fragments become empty chunks, other chunks keep their content,
-    and the chunk count stays equal to the input so recorded chunk delays remain aligned.
+    by the text up to and including it. A placeholder therefore lands in the chunk where
+    enough of the value has arrived for it to be recognised, normally the chunk where it
+    completes, earlier fragments become empty chunks, other chunks keep their content, and
+    the chunk count stays equal to the input so recorded chunk delays remain aligned.
+
+    Settling rescans only the text after the last boundary known to line up with the joint
+    result, plus a little literal text before it for regex context, so the work grows with
+    the stream rather than with every chunk that settles.
     """
     cleaned = [
         sanitize_string(chunk, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
@@ -350,17 +367,36 @@ def sanitize_chunks(
     pieces: list[str] = []
     start = 0
     consumed = 0
+    # joined[:aligned] is known to sanitize to target[:aligned_start] and to end in `context`
+    # characters that sanitizing left untouched. A boundary is only trusted when the one
+    # before it was trusted and the chunk's tail was left alone, since a fragment can
+    # sanitize to the same placeholder as the longer value it is part of.
+    aligned = 0
+    aligned_start = 0
+    context = 0
     for index, (chunk, clean) in enumerate(zip(chunks, cleaned, strict=True)):
+        previous = consumed
         consumed += len(chunk)
         if index == len(chunks) - 1:
             end = len(target)
         elif target.startswith(clean, start):
             end = start + len(clean)
+            intact = _common_suffix_length(chunk, clean)
+            if intact and aligned == previous:
+                if intact == len(chunk):
+                    intact += context
+                aligned, aligned_start, context = consumed, end, min(intact, _SETTLE_CONTEXT)
         else:
+            window = joined[aligned - context : consumed]
             settled = sanitize_string(
-                joined[:consumed], custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                window, custom_patterns=custom_patterns, pii_redactor=pii_redactor
             )
-            end = max(start, _common_prefix_length(settled, target))
+            base = aligned_start - context
+            agreed = _common_prefix_length(settled, target[base : base + len(settled)])
+            end = max(start, base + agreed)
+            intact = _common_suffix_length(window, settled)
+            if intact and agreed == len(settled):
+                aligned, aligned_start, context = consumed, end, min(intact, _SETTLE_CONTEXT)
         pieces.append(target[start:end])
         start = end
     return pieces
