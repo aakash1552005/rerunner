@@ -306,6 +306,57 @@ def sanitize_body(
     return sanitize_string(body, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
 
 
+def _common_prefix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return index
+
+
+def sanitize_chunks(
+    chunks: list[str],
+    custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
+) -> list[str]:
+    """Sanitize streamed chunks so a value split across chunk boundaries is still redacted.
+
+    Each chunk is sanitized on its own first; when joining those results already matches
+    sanitizing the joined text they are returned unchanged. Otherwise the chunks are re-cut
+    against the jointly sanitized text: a chunk that matches it at the current position is
+    kept as is, and a chunk that does not is given only the part of the joint result settled
+    by the text up to and including it. A placeholder therefore lands in the chunk where the
+    value completed, earlier fragments become empty chunks, other chunks keep their content,
+    and the chunk count stays equal to the input so recorded chunk delays remain aligned.
+    """
+    cleaned = [
+        sanitize_string(chunk, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+        for chunk in chunks
+    ]
+    joined = "".join(chunks)
+    target = sanitize_string(joined, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+    if "".join(cleaned) == target:
+        return cleaned
+
+    pieces: list[str] = []
+    start = 0
+    consumed = 0
+    for index, (chunk, clean) in enumerate(zip(chunks, cleaned, strict=True)):
+        consumed += len(chunk)
+        if index == len(chunks) - 1:
+            end = len(target)
+        elif target.startswith(clean, start):
+            end = start + len(clean)
+        else:
+            settled = sanitize_string(
+                joined[:consumed], custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
+            end = max(start, _common_prefix_length(settled, target))
+        pieces.append(target[start:end])
+        start = end
+    return pieces
+
+
 def find_sensitive_leaks(
     data: Any,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,

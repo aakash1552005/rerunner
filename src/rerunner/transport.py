@@ -22,8 +22,8 @@ from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
 from rerunner.sanitizer import (
     PiiRedactor,
     sanitize_body,
+    sanitize_chunks,
     sanitize_headers,
-    sanitize_string,
     sanitize_url,
 )
 
@@ -150,10 +150,10 @@ class _RecordingSyncByteStream(httpx.SyncByteStream):
             response_bytes.decode("utf-8", errors="replace"), pii_redactor=self.pii_redactor
         )
 
-        cleaned_chunks = [
-            sanitize_string(chunk.decode("utf-8", errors="replace"), pii_redactor=self.pii_redactor)
-            for chunk in self.chunks
-        ]
+        cleaned_chunks = sanitize_chunks(
+            [chunk.decode("utf-8", errors="replace") for chunk in self.chunks],
+            pii_redactor=self.pii_redactor,
+        )
 
         cleaned_resp_headers = sanitize_headers(
             dict(self.real_response.headers), pii_redactor=self.pii_redactor
