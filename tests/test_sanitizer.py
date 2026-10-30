@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
+
+import pytest
+
 from rerunner.sanitizer import (
+    SetherRedactor,
+    sanitize_body,
     sanitize_headers,
     sanitize_payload,
     sanitize_string,
@@ -87,3 +95,49 @@ def test_sanitize_url_sensitive_query_parameters() -> None:
     assert "key=%5BREDACTED%5D" in cleaned or "key=[REDACTED]" in cleaned
     assert "client_secret=%5BREDACTED%5D" in cleaned or "client_secret=[REDACTED]" in cleaned
     assert "search=test_term" in cleaned
+
+
+class _MarkerRedactor:
+    """Minimal pii_redactor stub recording the text it receives."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def redact(self, text: str) -> str:
+        self.seen.append(text)
+        return text.replace("ticket-7781", "[REDACTED_TICKET]")
+
+
+def test_pii_redactor_runs_after_builtin_patterns() -> None:
+    dummy_key = "sk-" + "12345678901234567890123456789012"
+    redactor = _MarkerRedactor()
+    cleaned = sanitize_string(f"key {dummy_key} ref ticket-7781", pii_redactor=redactor)
+    assert cleaned == "key [REDACTED_OPENAI_KEY] ref [REDACTED_TICKET]"
+    assert redactor.seen == ["key [REDACTED_OPENAI_KEY] ref ticket-7781"]
+
+
+def test_pii_redactor_applies_through_json_bodies() -> None:
+    body = '{"ref": "ticket-7781", "created": 1730000000, "tags": ["ticket-7781"]}'
+    cleaned = sanitize_body(body, pii_redactor=_MarkerRedactor())
+    assert json.loads(cleaned) == {
+        "ref": "[REDACTED_TICKET]",
+        "created": 1730000000,
+        "tags": ["[REDACTED_TICKET]"],
+    }
+
+
+def test_sether_redactor_requires_optional_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "sether", None)
+    with pytest.raises(ImportError, match=r"rerunner\[sether\]"):
+        SetherRedactor()
+
+
+def test_default_sanitizer_never_imports_sether() -> None:
+    script = (
+        "import sys\n"
+        "import rerunner\n"
+        "rerunner.sanitize_string('contact alice.smith@example.org')\n"
+        "assert 'sether' not in sys.modules\n"
+        "assert 'phonenumbers' not in sys.modules\n"
+    )
+    subprocess.run([sys.executable, "-c", script], check=True)

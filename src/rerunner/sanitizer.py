@@ -3,15 +3,20 @@
 Includes comprehensive scanning for OpenAI, Anthropic, Google, AWS, GitHub, Slack tokens,
 plus standard PII sanitization (Emails, Credit Cards, IPv4 addresses, and US Phone numbers).
 Safe for JSON payloads and preserves numeric values (e.g. Unix timestamps) and semver version strings.
+An optional PII backend can be supplied as ``pii_redactor`` and runs after the built-in patterns.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import dataclasses
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+if TYPE_CHECKING:
+    from sether import Detector
 
 # Regular expressions detecting common API keys and sensitive tokens
 SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -110,9 +115,18 @@ def _is_probable_ip(ip_str: str) -> bool:
     )
 
 
+class PiiRedactor(Protocol):
+    """Pluggable PII backend applied after the built-in secret and PII patterns."""
+
+    def redact(self, text: str) -> str:
+        """Return ``text`` with detected PII replaced by placeholders."""
+        ...
+
+
 def sanitize_string(
     text: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
 ) -> str:
     """Scan and scrub sensitive API tokens and PII from arbitrary strings."""
     if not text:
@@ -148,12 +162,17 @@ def sanitize_string(
         for pattern, replacement in custom_patterns:
             sanitized = pattern.sub(replacement, sanitized)
 
+    # Apply the optional PII backend after the built-in patterns
+    if pii_redactor is not None:
+        sanitized = pii_redactor.redact(sanitized)
+
     return sanitized
 
 
 def sanitize_url(
     url: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
 ) -> str:
     """Sanitize secrets from URL query parameters (e.g. ?key=AIza...) and path components."""
     if not url:
@@ -161,7 +180,7 @@ def sanitize_url(
 
     parts = urlsplit(url)
     if not parts.query:
-        return sanitize_string(url, custom_patterns=custom_patterns)
+        return sanitize_string(url, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
 
     query_params = parse_qsl(parts.query, keep_blank_values=True)
     sanitized_params: list[tuple[str, str]] = []
@@ -171,11 +190,15 @@ def sanitize_url(
         if k_lower in SENSITIVE_QUERY_PARAMS:
             sanitized_params.append((k, "[REDACTED]"))
         else:
-            sanitized_val = sanitize_string(v, custom_patterns=custom_patterns)
+            sanitized_val = sanitize_string(
+                v, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
             sanitized_params.append((k, sanitized_val))
 
     clean_query = urlencode(sanitized_params)
-    clean_path = sanitize_string(parts.path, custom_patterns=custom_patterns)
+    clean_path = sanitize_string(
+        parts.path, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+    )
 
     return urlunsplit((parts.scheme, parts.netloc, clean_path, clean_query, parts.fragment))
 
@@ -183,6 +206,7 @@ def sanitize_url(
 def sanitize_headers(
     headers: dict[str, str],
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
 ) -> dict[str, str]:
     """Scrub sensitive HTTP headers before writing to cassette."""
     sanitized: dict[str, str] = {}
@@ -191,32 +215,41 @@ def sanitize_headers(
         if k_lower in SENSITIVE_HEADERS:
             sanitized[k_lower] = "[REDACTED]"
         else:
-            sanitized[k_lower] = sanitize_string(value, custom_patterns=custom_patterns)
+            sanitized[k_lower] = sanitize_string(
+                value, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
     return sanitized
 
 
 def sanitize_payload(
     data: Any,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
 ) -> Any:
     """Recursively sanitize dicts, lists, and strings for safe storage without mutating numbers or booleans."""
     if hasattr(data, "model_dump") and callable(data.model_dump):
         try:
-            return sanitize_payload(data.model_dump(mode="python"), custom_patterns=custom_patterns)
+            return sanitize_payload(
+                data.model_dump(mode="python"),
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+            )
         except Exception:  # nosec B110
             pass
     if dataclasses.is_dataclass(data) and not isinstance(data, type):
         try:
-            return sanitize_payload(dataclasses.asdict(data), custom_patterns=custom_patterns)
+            return sanitize_payload(
+                dataclasses.asdict(data), custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
         except Exception:  # nosec B110
             pass
     if isinstance(data, str):
-        return sanitize_string(data, custom_patterns=custom_patterns)
+        return sanitize_string(data, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
     if isinstance(data, dict):
         result: dict[Any, Any] = {}
         for k, v in data.items():
             clean_k = (
-                sanitize_string(str(k), custom_patterns=custom_patterns)
+                sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
                 if isinstance(k, str)
                 else k
             )
@@ -228,18 +261,27 @@ def sanitize_payload(
             ):
                 result[clean_k] = v
             else:
-                result[clean_k] = sanitize_payload(v, custom_patterns=custom_patterns)
+                result[clean_k] = sanitize_payload(
+                    v, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                )
         return result
     if isinstance(data, list):
-        return [sanitize_payload(item, custom_patterns=custom_patterns) for item in data]
+        return [
+            sanitize_payload(item, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            for item in data
+        ]
     if isinstance(data, tuple):
-        return tuple(sanitize_payload(item, custom_patterns=custom_patterns) for item in data)
+        return tuple(
+            sanitize_payload(item, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            for item in data
+        )
     return data
 
 
 def sanitize_body(
     body: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
 ) -> str:
     """Parse JSON bodies to safely redact string values while preserving numbers, booleans, and structure.
 
@@ -254,12 +296,14 @@ def sanitize_body(
     ):
         try:
             parsed = json.loads(trimmed)
-            sanitized_data = sanitize_payload(parsed, custom_patterns=custom_patterns)
+            sanitized_data = sanitize_payload(
+                parsed, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
             return json.dumps(sanitized_data, ensure_ascii=False)
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    return sanitize_string(body, custom_patterns=custom_patterns)
+    return sanitize_string(body, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
 
 
 def find_sensitive_leaks(
@@ -349,3 +393,89 @@ def sanitize_pii(
 
     # High-speed fallback
     return sanitize_string(text)
+
+
+_SETHER_ENTITY_PLACEHOLDERS: dict[str, str] = {
+    "EMAIL_ADDRESS": "[REDACTED_EMAIL]",
+    "PHONE_NUMBER": "[REDACTED_PHONE]",
+    "CREDIT_CARD": "[REDACTED_CREDIT_CARD]",
+    "US_SSN": "[REDACTED_SSN]",
+}
+
+
+class SetherRedactor:
+    """Optional PII backend built on Sether detectors, emitting the built-in placeholders.
+
+    Requires the ``sether`` extra (``pip install "rerunner[sether]"``); the package is imported
+    lazily so the default sanitizer never loads it. Entities use the same names as
+    ``sanitize_pii``: ``EMAIL_ADDRESS``, ``PHONE_NUMBER``, ``CREDIT_CARD`` and ``US_SSN``.
+    ``IP_ADDRESS`` stays on the built-in version-aware regex. ``PHONE_NUMBER`` matches
+    international ``+`` numbers only unless ``phone_regions`` lists ISO 3166-1 alpha-2 codes
+    whose national formats should also be recognised.
+    """
+
+    def __init__(
+        self,
+        entities: Iterable[str] | None = None,
+        phone_regions: Iterable[str] = (),
+    ) -> None:
+        try:
+            import phonenumbers
+            import sether
+        except ImportError as exc:
+            raise ImportError(
+                "SetherRedactor requires the optional 'sether' package. "
+                'Install it with: pip install "rerunner[sether]"'
+            ) from exc
+
+        selected = list(entities) if entities is not None else list(_SETHER_ENTITY_PLACEHOLDERS)
+        if not selected or set(selected).difference(_SETHER_ENTITY_PLACEHOLDERS):
+            raise ValueError(
+                "SetherRedactor entities must be a non-empty subset of "
+                f"{sorted(_SETHER_ENTITY_PLACEHOLDERS)}, got {selected}"
+            )
+
+        regions = list(phone_regions)
+        unknown_regions = sorted(set(regions).difference(phonenumbers.SUPPORTED_REGIONS))
+        if unknown_regions:
+            raise ValueError(f"Unknown phone regions: {unknown_regions}")
+
+        phone: Detector = (
+            sether.create_multi_region_phone_detector(regions) if regions else sether.phone_detector
+        )
+        available: dict[str, Detector] = {
+            "EMAIL_ADDRESS": sether.email_detector,
+            "PHONE_NUMBER": phone,
+            "CREDIT_CARD": sether.credit_card_detector,
+            "US_SSN": sether.ssn_detector,
+        }
+
+        self.entities = list(dict.fromkeys(selected))
+        self.phone_regions = regions
+        self._detectors = [
+            (available[entity], _SETHER_ENTITY_PLACEHOLDERS[entity]) for entity in self.entities
+        ]
+
+    def redact(self, text: str) -> str:
+        """Replace every detected entity with its placeholder, merging overlapping matches."""
+        if not text:
+            return text
+        spans = [
+            (match.start, match.end, placeholder)
+            for detector, placeholder in self._detectors
+            for match in detector.detect(text)
+        ]
+        if not spans:
+            return text
+        spans.sort(key=lambda span: (span[0], span[0] - span[1]))
+        pieces: list[str] = []
+        cursor = 0
+        for start, end, placeholder in spans:
+            if start < cursor:
+                cursor = max(cursor, end)
+                continue
+            pieces.append(text[cursor:start])
+            pieces.append(placeholder)
+            cursor = end
+        pieces.append(text[cursor:])
+        return "".join(pieces)

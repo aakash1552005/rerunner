@@ -13,6 +13,7 @@ from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette, CassetteError
 from rerunner.matcher import MatchingStrategy
 from rerunner.patcher import reset_active_session, set_active_session
+from rerunner.sanitizer import PiiRedactor
 from rerunner.side_effects import reset_active_cassette, set_active_cassette
 from rerunner.storage import get_storage_backend
 from rerunner.transport import CassetteTransport
@@ -45,6 +46,7 @@ class SessionContext:
                 mode=transport.mode,
                 fork_step=transport.fork_step,
                 cassette=transport.cassette,
+                pii_redactor=transport.pii_redactor,
             )
         )
         self.cassette = transport.cassette
@@ -74,6 +76,7 @@ class Session:
         chunk_delay_ms: int = 0,
         record_partial_streams: bool = False,
         matching_strategy: MatchingStrategy = "strict",
+        pii_redactor: PiiRedactor | None = None,
     ) -> None:
         self.cassette_path = Path(cassette_path)
         self.requested_mode = mode
@@ -82,6 +85,7 @@ class Session:
         self.chunk_delay_ms = chunk_delay_ms
         self.record_partial_streams = record_partial_streams
         self.matching_strategy = matching_strategy
+        self.pii_redactor = pii_redactor
 
         self.effective_mode: ResolvedMode = "record"
         self.transport: CassetteTransport
@@ -142,6 +146,7 @@ class Session:
             record_partial_streams=self.record_partial_streams,
             matching_strategy=self.matching_strategy,
             cassette=self.cassette,
+            pii_redactor=self.pii_redactor,
         )
 
         self.async_transport = AsyncCassetteTransport(
@@ -152,6 +157,7 @@ class Session:
             record_partial_streams=self.record_partial_streams,
             matching_strategy=self.matching_strategy,
             cassette=self.cassette,
+            pii_redactor=self.pii_redactor,
         )
 
         self._cassette_token = set_active_cassette(
@@ -225,6 +231,7 @@ def record(
     chunk_delay_ms: int = 0,
     record_partial_streams: bool = False,
     matching_strategy: MatchingStrategy = "strict",
+    pii_redactor: PiiRedactor | None = None,
 ) -> Session:
     """Return a Session configured in record mode."""
     return Session(
@@ -234,6 +241,7 @@ def record(
         chunk_delay_ms=chunk_delay_ms,
         record_partial_streams=record_partial_streams,
         matching_strategy=matching_strategy,
+        pii_redactor=pii_redactor,
     )
 
 
@@ -259,6 +267,7 @@ def fork(
     auto_patch: bool = True,
     chunk_delay_ms: int = 0,
     matching_strategy: MatchingStrategy = "strict",
+    pii_redactor: PiiRedactor | None = None,
 ) -> Session:
     """Return a Session configured in fork mode from the specified step."""
     return Session(
@@ -268,4 +277,5 @@ def fork(
         auto_patch=auto_patch,
         chunk_delay_ms=chunk_delay_ms,
         matching_strategy=matching_strategy,
+        pii_redactor=pii_redactor,
     )

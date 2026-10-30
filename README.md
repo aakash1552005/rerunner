@@ -372,6 +372,30 @@ Rerunner automatically redacts sensitive data before persisting cassettes:
 * **Credit Cards** (validated with Luhn checksum) $\rightarrow$ `[REDACTED_CREDIT_CARD]`
 * **JSON Structure Preservation**: Numeric fields (like `"created": 1730000000`) remain valid numbers.
 
+### Optional Sether backend
+
+Install the `sether` extra to run [Sether](https://pypi.org/project/sether/) detectors after the built-in patterns. Nothing changes unless `pii_redactor` is set, and `sether` is never imported on the default path.
+
+```bash
+pip install "rerunner[sether]"
+```
+
+```python
+from rerunner import CassetteTransport, SetherRedactor
+
+transport = CassetteTransport(
+    "cassettes/support_agent.jsonl",
+    mode="record",
+    pii_redactor=SetherRedactor(),
+)
+```
+
+`Session`, `record()` and `fork()` accept the same `pii_redactor` argument.
+
+* **Entities**: `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD` and `US_SSN`, emitting the same `[REDACTED_*]` placeholders. `IP_ADDRESS` stays on the built-in version-aware regex. Select a subset with `SetherRedactor(entities=[...])`.
+* **What it adds**: international `+` phone numbers for any country, Luhn-valid 13 to 19 digit cards (for example 15-digit Amex), and emails whose TLD is longer than seven characters. `US_SSN` adds nothing beyond the built-in pattern and is accepted for entity selection only.
+* **Phone regions**: `PHONE_NUMBER` matches international numbers only by default. `SetherRedactor(phone_regions=["NG", "GB"])` also matches national formats for those countries (ISO 3166-1 alpha-2), at the cost of more false positives on bare 10-digit identifiers.
+
 ---
 
 ## 💻 CLI Commands
