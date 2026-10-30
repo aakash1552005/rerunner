@@ -16,6 +16,7 @@ from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
 from rerunner.models import CassetteEntry
 from rerunner.sanitizer import (
     find_sensitive_leaks,
+    sanitize_chunks,
     sanitize_headers,
     sanitize_payload,
     sanitize_string,
@@ -650,7 +651,7 @@ def scrub(
                 entry.response.body = sanitize_string(entry.response.body)
 
             if entry.response.chunks:
-                entry.response.chunks = [sanitize_string(c) for c in entry.response.chunks]
+                entry.response.chunks = sanitize_chunks(entry.response.chunks)
             scrubbed_count += 1
         elif entry.entry_type in ("side_effect", "tool"):
             if entry.side_effect_args:

@@ -246,13 +246,22 @@ def sanitize_payload(
     if isinstance(data, str):
         return sanitize_string(data, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
     if isinstance(data, dict):
+        cleaned_keys = [
+            sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            if isinstance(k, str)
+            else k
+            for k in data
+        ]
+        # Names of keys that are not redacted are reserved so a suffix never takes one of them
+        reserved = {clean_k for k, clean_k in zip(data, cleaned_keys, strict=True) if clean_k == k}
         result: dict[Any, Any] = {}
-        for k, v in data.items():
-            clean_k = (
-                sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
-                if isinstance(k, str)
-                else k
-            )
+        for (k, v), clean_k in zip(data.items(), cleaned_keys, strict=True):
+            # Keep every record when two keys sanitize to the same placeholder
+            if clean_k in result or (clean_k != k and clean_k in reserved):
+                suffix = 2
+                while f"{clean_k}#{suffix}" in result or f"{clean_k}#{suffix}" in reserved:
+                    suffix += 1
+                clean_k = f"{clean_k}#{suffix}"
             # If the key is specifically version/semver, do not redact the value as an IP
             if (
                 isinstance(k, str)
@@ -304,6 +313,137 @@ def sanitize_body(
             pass
 
     return sanitize_string(body, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+
+
+# How far settling looks back across a chunk boundary: literal characters kept in front of a
+# rescan so boundary assertions see their context, and the most a value may run on into the
+# next chunk while that chunk still lines up without a rescan
+_SETTLE_REACH = 128
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return index
+
+
+def _common_suffix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[-1 - index] == right[-1 - index]:
+        index += 1
+    return index
+
+
+def _absorbed_head(chunk: str, clean: str, target: str, start: int, limit: int) -> int:
+    """Return how many leading characters of ``chunk`` the value ending the previous chunk
+    took, such that the rest of ``clean`` matches ``target`` at ``start``.
+
+    Zero means the chunk matches as it is and -1 that it does not line up within ``limit``.
+    Only a head that sanitizing the chunk left unchanged is handed over, so it is raw text,
+    and some of the chunk has to remain so that an empty remainder never counts as a match.
+    """
+    if target.startswith(clean, start):
+        return 0
+    literal = _common_prefix_length(chunk, clean)
+    for head in range(1, min(literal, limit, len(clean) - 1) + 1):
+        if target.startswith(clean[head:], start):
+            return head
+    return -1
+
+
+def sanitize_chunks(
+    chunks: list[str],
+    custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
+    pii_redactor: PiiRedactor | None = None,
+) -> list[str]:
+    """Sanitize streamed chunks so a value split across chunk boundaries is still redacted.
+
+    Each chunk is sanitized on its own first; when joining those results already matches
+    sanitizing the joined text they are returned unchanged. Otherwise the chunks are re-cut
+    against the jointly sanitized text: a chunk that matches it at the current position is
+    kept as is, and a chunk that does not is given only the part of the joint result settled
+    by the text up to and including it. A placeholder therefore lands in the chunk where
+    enough of the value has arrived for it to be recognised, normally the chunk where it
+    completes, earlier fragments become empty chunks, other chunks keep their content, and
+    the chunk count stays equal to the input so recorded chunk delays remain aligned.
+
+    Settling rescans only the text since the last point confirmed to line up with the joint
+    result, plus a little literal text before it for regex context. A rescan that disagrees
+    only inside the raw text at its end confirms everything before that text, and a
+    boundary that ends in a redacted value is confirmed by the chunk after it, which may
+    hand its first characters to that value. The text scanned therefore normally stays
+    within a small multiple of the stream instead of growing with its square.
+    """
+    cleaned = [
+        sanitize_string(chunk, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+        for chunk in chunks
+    ]
+    joined = "".join(chunks)
+    target = sanitize_string(joined, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+    if "".join(cleaned) == target:
+        return cleaned
+
+    pieces: list[str] = []
+    start = 0
+    consumed = 0
+    # joined[:aligned] is known to sanitize to target[:aligned_start] and to end in `context`
+    # characters that sanitizing left untouched. `pending` is a boundary that also lines up
+    # unless the value ending there runs on into the next chunk, which that chunk decides,
+    # since a fragment can sanitize to the same placeholder as the longer value it is part of.
+    aligned = 0
+    aligned_start = 0
+    context = 0
+    pending: tuple[int, int] | None = None
+    for index, (chunk, clean) in enumerate(zip(chunks, cleaned, strict=True)):
+        previous = consumed
+        consumed += len(chunk)
+        continued = pending == (previous, start)
+        if index == len(chunks) - 1:
+            end = len(target)
+        elif (
+            absorbed := _absorbed_head(
+                chunk, clean, target, start, _SETTLE_REACH if continued else 0
+            )
+        ) >= 0:
+            end = start + len(clean) - absorbed
+            if continued:
+                aligned, aligned_start, context = previous + absorbed, start, 0
+            if aligned == previous + absorbed:
+                intact = min(_common_suffix_length(chunk, clean), len(chunk) - absorbed)
+                if intact == len(chunk):
+                    intact += context
+                if intact:
+                    aligned, aligned_start, context = consumed, end, min(intact, _SETTLE_REACH)
+                    pending = None
+                elif chunk:
+                    pending = (consumed, end)
+            else:
+                pending = None
+        else:
+            window = joined[aligned - context : consumed]
+            settled = sanitize_string(
+                window, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+            )
+            base = aligned_start - context
+            agreed = _common_prefix_length(settled, target[base : base + len(settled)])
+            end = max(start, base + agreed)
+            intact = _common_suffix_length(window, settled)
+            unsettled = len(settled) - agreed
+            pending = None
+            if unsettled == 0 and intact == 0:
+                pending = (consumed, end)
+            elif unsettled <= intact:
+                # Any disagreement sits in raw text at the end of the window, where a value
+                # runs on into the next chunk, so everything before it lines up exactly
+                aligned = consumed - unsettled
+                aligned_start = base + agreed
+                context = min(intact - unsettled, _SETTLE_REACH)
+        pieces.append(target[start:end])
+        start = end
+    return pieces
 
 
 def find_sensitive_leaks(

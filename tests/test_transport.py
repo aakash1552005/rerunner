@@ -147,3 +147,28 @@ async def test_async_pii_redactor_applies_before_persisting(
     raw = temp_cassette_path.read_bytes()
     assert b"ticket-7781" not in raw
     assert b"[REDACTED_TICKET]" in raw
+
+
+def test_sync_record_keeps_records_whose_keys_sanitize_alike(temp_cassette_path: Path) -> None:
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"users": {"ops@acme.org": {"id": 1}, "sales@acme.org": {"id": 2}}}
+        )
+
+    record_transport = CassetteTransport(
+        cassette_path=temp_cassette_path,
+        mode="record",
+        real_transport=httpx.MockTransport(handle_request),
+    )
+    with httpx.Client(transport=record_transport) as client:
+        resp = client.get("https://api.example.test/users")
+        assert len(resp.json()["users"]) == 2
+
+    raw = temp_cassette_path.read_bytes()
+    assert b"acme.org" not in raw
+    assert b"[REDACTED_EMAIL]#2" in raw
+
+    replay_transport = CassetteTransport(cassette_path=temp_cassette_path, mode="replay")
+    with httpx.Client(transport=replay_transport) as client:
+        users = client.get("https://api.example.test/users").json()["users"]
+    assert users == {"[REDACTED_EMAIL]": {"id": 1}, "[REDACTED_EMAIL]#2": {"id": 2}}

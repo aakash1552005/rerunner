@@ -14,6 +14,7 @@ from rerunner.cassette import Cassette
 from rerunner.sanitizer import (
     SetherRedactor,
     sanitize_body,
+    sanitize_chunks,
     sanitize_headers,
     sanitize_string,
     sanitize_url,
@@ -282,4 +283,65 @@ def test_streaming_chunks_are_clean_and_replay_matches(tmp_path: Path) -> None:
         client.stream("POST", "https://api.example.test/v1/chat", json=request_body) as response,
     ):
         assert [chunk.decode("utf-8") for chunk in response.iter_raw()] == REDACTED_SSE_CHUNKS
+    assert calls == 1
+
+
+SPLIT_SSE_CHUNKS = [
+    b'data: {"token":"mail ops@acme-co',
+    b'rp.technology done"}\n\n',
+    b"data: [DONE]\n\n",
+]
+REDACTED_SPLIT_SSE_CHUNKS = [
+    'data: {"token":"mail ',
+    '[REDACTED_EMAIL] done"}\n\n',
+    "data: [DONE]\n\n",
+]
+
+
+def test_sanitize_chunks_applies_backend_across_boundaries() -> None:
+    chunks = [chunk.decode("utf-8") for chunk in SPLIT_SSE_CHUNKS]
+    assert sanitize_chunks(chunks) == chunks
+    assert sanitize_chunks(chunks, pii_redactor=SetherRedactor()) == REDACTED_SPLIT_SSE_CHUNKS
+
+
+def test_streaming_value_split_across_chunks_is_clean_and_replays(tmp_path: Path) -> None:
+    cassette_path = tmp_path / "split-stream.jsonl"
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            stream=_ChunkStream(SPLIT_SSE_CHUNKS),
+            request=request,
+        )
+
+    network = httpx.MockTransport(handler)
+    request_body = {"model": "test", "stream": True}
+
+    record_transport = CassetteTransport(
+        cassette_path, mode="record", real_transport=network, pii_redactor=SetherRedactor()
+    )
+    with (
+        httpx.Client(transport=record_transport) as client,
+        client.stream("POST", "https://api.example.test/v1/chat", json=request_body) as response,
+    ):
+        assert list(response.iter_raw()) == SPLIT_SSE_CHUNKS
+
+    raw = cassette_path.read_bytes()
+    assert b"ops@acme" not in raw
+    assert b"acme-corp" not in raw
+
+    recorded = Cassette.load(cassette_path).entries[0].response
+    assert recorded is not None
+    assert recorded.chunks == REDACTED_SPLIT_SSE_CHUNKS
+
+    replay_transport = CassetteTransport(cassette_path, mode="replay", real_transport=network)
+    with (
+        httpx.Client(transport=replay_transport) as client,
+        client.stream("POST", "https://api.example.test/v1/chat", json=request_body) as response,
+    ):
+        assert [chunk.decode("utf-8") for chunk in response.iter_raw()] == REDACTED_SPLIT_SSE_CHUNKS
     assert calls == 1

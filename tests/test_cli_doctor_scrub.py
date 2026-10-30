@@ -106,3 +106,47 @@ def test_cli_scrub_removes_secrets_and_rechains_integrity(tmp_path: Path) -> Non
     # Cryptographic integrity
     is_valid, err = verify_cassette_integrity(scrubbed.entries)
     assert is_valid, err
+
+
+def test_cli_scrub_redacts_values_split_across_stream_chunks(tmp_path: Path) -> None:
+    leaky_file = tmp_path / "leaky_stream.jsonl"
+    scrubbed_file = tmp_path / "scrubbed_stream.jsonl"
+
+    c = Cassette(leaky_file)
+    c.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST",
+                url="https://api.openai.com/v1/chat/completions",
+                body='{"stream": true}',
+            ),
+            response=RecordedResponse(
+                status_code=200,
+                headers={"content-type": "text/event-stream"},
+                body='data: {"token":"mail alice.smith@example.org done"}\n\ndata: [DONE]\n\n',
+                chunks=[
+                    'data: {"token":"mail alice.smith@exam',
+                    'ple.org done"}\n\n',
+                    "data: [DONE]\n\n",
+                ],
+                chunk_delays_ms=[0.0, 1.0, 1.0],
+                is_streaming=True,
+            ),
+        )
+    )
+    c.save()
+
+    res_scrub = runner.invoke(app, ["scrub", str(leaky_file), "--output", str(scrubbed_file)])
+    assert res_scrub.exit_code == 0
+
+    assert "alice.smith" not in scrubbed_file.read_text()
+    response = Cassette.load(scrubbed_file).entries[0].response
+    assert response is not None
+    assert response.chunks == [
+        'data: {"token":"mail ',
+        '[REDACTED_EMAIL] done"}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    assert response.chunk_delays_ms == [0.0, 1.0, 1.0]

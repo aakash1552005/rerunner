@@ -19,6 +19,18 @@ SSE_CHUNKS = [
     b"data: [DONE]\n\n",
 ]
 
+SPLIT_SSE_CHUNKS = [
+    b'data: {"token":"mail alice.smith@exam',
+    b'ple.org done"}\n\n',
+    b"data: [DONE]\n\n",
+]
+
+REDACTED_SPLIT_SSE_CHUNKS = [
+    b'data: {"token":"mail ',
+    b'[REDACTED_EMAIL] done"}\n\n',
+    b"data: [DONE]\n\n",
+]
+
 
 class SyncChunkStream(httpx.SyncByteStream):
     """Yield predefined synchronous response chunks."""
@@ -270,3 +282,105 @@ def test_negative_chunk_delay_is_rejected(
     """Streaming transports reject negative simulated latency."""
     with pytest.raises(ValueError, match="chunk_delay_ms must be non-negative"):
         transport_type(tmp_path / "stream.jsonl", chunk_delay_ms=-1)
+
+
+def test_sync_stream_redacts_value_split_across_chunks(tmp_path: Path) -> None:
+    """A value split across network chunks never reaches the cassette or the replay."""
+    cassette_path = tmp_path / "split-stream.jsonl"
+    network_call_count = 0
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        nonlocal network_call_count
+        network_call_count += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            stream=SyncChunkStream(SPLIT_SSE_CHUNKS),
+            request=request,
+        )
+
+    network = httpx.MockTransport(handle_request)
+    request_body = {"model": "test", "stream": True}
+
+    record_transport = CassetteTransport(cassette_path, mode="record", real_transport=network)
+    with (
+        httpx.Client(transport=record_transport) as client,
+        client.stream(
+            "POST",
+            "https://example.test/v1/chat/completions",
+            json=request_body,
+        ) as response,
+    ):
+        assert list(response.iter_raw()) == SPLIT_SSE_CHUNKS
+
+    assert b"alice.smith" not in cassette_path.read_bytes()
+    recorded_response = Cassette.load(cassette_path).entries[0].response
+    assert recorded_response is not None
+    assert recorded_response.chunks == [
+        chunk.decode("utf-8") for chunk in REDACTED_SPLIT_SSE_CHUNKS
+    ]
+    assert len(recorded_response.chunk_delays_ms) == len(REDACTED_SPLIT_SSE_CHUNKS)
+
+    replay_transport = CassetteTransport(cassette_path, mode="replay", real_transport=network)
+    with (
+        httpx.Client(transport=replay_transport) as client,
+        client.stream(
+            "POST",
+            "https://example.test/v1/chat/completions",
+            json=request_body,
+        ) as response,
+    ):
+        assert list(response.iter_raw()) == REDACTED_SPLIT_SSE_CHUNKS
+
+    assert network_call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_async_stream_redacts_value_split_across_chunks(tmp_path: Path) -> None:
+    """The asynchronous transport applies the same boundary-aware chunk sanitization."""
+    cassette_path = tmp_path / "split-stream-async.jsonl"
+    network_call_count = 0
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        nonlocal network_call_count
+        network_call_count += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            stream=AsyncChunkStream(SPLIT_SSE_CHUNKS),
+            request=request,
+        )
+
+    network = httpx.MockTransport(handle_request)
+    request_body = {"model": "test", "stream": True}
+
+    record_transport = AsyncCassetteTransport(cassette_path, mode="record", real_transport=network)
+    async with (
+        httpx.AsyncClient(transport=record_transport) as client,
+        client.stream(
+            "POST",
+            "https://example.test/v1/chat/completions",
+            json=request_body,
+        ) as response,
+    ):
+        assert [chunk async for chunk in response.aiter_raw()] == SPLIT_SSE_CHUNKS
+
+    assert b"alice.smith" not in cassette_path.read_bytes()
+    recorded_response = Cassette.load(cassette_path).entries[0].response
+    assert recorded_response is not None
+    assert recorded_response.chunks == [
+        chunk.decode("utf-8") for chunk in REDACTED_SPLIT_SSE_CHUNKS
+    ]
+
+    replay_transport = AsyncCassetteTransport(cassette_path, mode="replay", real_transport=network)
+    async with (
+        httpx.AsyncClient(transport=replay_transport) as client,
+        client.stream(
+            "POST",
+            "https://example.test/v1/chat/completions",
+            json=request_body,
+        ) as response,
+    ):
+        assert [chunk async for chunk in response.aiter_raw()] == REDACTED_SPLIT_SSE_CHUNKS
+
+    assert network_call_count == 1
