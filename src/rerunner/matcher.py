@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+from collections import Counter
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -13,7 +16,7 @@ from rerunner.sanitizer import SENSITIVE_QUERY_PARAMS
 if TYPE_CHECKING:
     from rerunner.models import RecordedRequest
 
-MatchingStrategy = Literal["strict", "content", "fuzzy"]
+MatchingStrategy = Literal["strict", "content", "fuzzy", "semantic"]
 
 # Headers that frequently vary across environments or runs without changing semantic meaning
 VOLATILE_HEADER_PREFIXES = (
@@ -143,6 +146,113 @@ def normalize_url(url: str) -> str:
     )
 
 
+def extract_prompt_text(body: bytes | str | None) -> str:
+    """Extract primary text content from an LLM request payload across OpenAI, Anthropic, and Gemini."""
+    if not body:
+        return ""
+    if isinstance(body, bytes):
+        try:
+            body_str = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    else:
+        body_str = body
+
+    trimmed = body_str.strip()
+    if not trimmed:
+        return ""
+
+    try:
+        data = json.loads(trimmed)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return trimmed
+
+    if not isinstance(data, dict):
+        return trimmed
+
+    texts: list[str] = []
+
+    # OpenAI / Anthropic messages list
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        for msg in messages:
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str):
+                    texts.append(content)
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            texts.append(part["text"])
+
+    # Google GenAI contents list
+    contents = data.get("contents")
+    if isinstance(contents, list):
+        for c in contents:
+            if isinstance(c, dict) and isinstance(c.get("parts"), list):
+                for part in c["parts"]:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        texts.append(part["text"])
+
+    # Generic prompt/input/system fields
+    for key in ("prompt", "input", "system"):
+        val = data.get(key)
+        if isinstance(val, str):
+            texts.append(val)
+
+    return " ".join(texts) if texts else trimmed
+
+
+def compute_text_cosine_similarity(text_a: str, text_b: str) -> float:
+    """Compute token and character trigram cosine similarity between two text strings."""
+    if not text_a and not text_b:
+        return 1.0
+    if not text_a or not text_b:
+        return 0.0
+    if text_a == text_b:
+        return 1.0
+
+    def get_features(text: str) -> Counter[str]:
+        words = re.findall(r"\b\w+\b", text.lower())
+        char_trigrams = [text[i : i + 3].lower() for i in range(len(text) - 2)]
+        return Counter(words + char_trigrams)
+
+    vec_a = get_features(text_a)
+    vec_b = get_features(text_b)
+
+    intersection = set(vec_a.keys()) & set(vec_b.keys())
+    dot_product = sum(vec_a[x] * vec_b[x] for x in intersection)
+
+    norm_a = math.sqrt(sum(v**2 for v in vec_a.values()))
+    norm_b = math.sqrt(sum(v**2 for v in vec_b.values()))
+
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return float(dot_product / (norm_a * norm_b))
+
+
+def compute_semantic_similarity(
+    body_a: bytes | str | None,
+    body_b: bytes | str | None,
+    embedding_fn: Callable[[str], list[float]] | None = None,
+) -> float:
+    """Compute semantic similarity between two request payloads, optionally using an embedding function."""
+    prompt_a = extract_prompt_text(body_a)
+    prompt_b = extract_prompt_text(body_b)
+
+    if embedding_fn is not None:
+        vec_a = embedding_fn(prompt_a)
+        vec_b = embedding_fn(prompt_b)
+        dot_product = sum(a * b for a, b in zip(vec_a, vec_b, strict=False))
+        norm_a = math.sqrt(sum(a**2 for a in vec_a))
+        norm_b = math.sqrt(sum(b**2 for b in vec_b))
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        return float(dot_product / (norm_a * norm_b))
+
+    return compute_text_cosine_similarity(prompt_a, prompt_b)
+
+
 def compute_request_key(
     method: str,
     url: str,
@@ -168,6 +278,8 @@ def request_matches(
     incoming_url: str,
     incoming_body: bytes | str | None = None,
     strategy: MatchingStrategy = "strict",
+    semantic_threshold: float = 0.80,
+    embedding_fn: Callable[[str], list[float]] | None = None,
 ) -> bool:
     """Determine whether an incoming request matches a recorded request under the given strategy."""
     incoming_key = compute_request_key(
@@ -175,9 +287,17 @@ def request_matches(
     )
     if recorded.request_key == incoming_key:
         return True
-    if strategy != "strict":
+    if strategy in ("content", "fuzzy"):
         recorded_key = compute_request_key(
             recorded.method, recorded.url, recorded.body, strategy=strategy
         )
         return recorded_key == incoming_key
+    if strategy == "semantic":
+        # Semantic matching: same method and normalized URL, plus prompt similarity >= threshold
+        if recorded.method.upper() != incoming_method.upper():
+            return False
+        if normalize_url(recorded.url) != normalize_url(incoming_url):
+            return False
+        sim = compute_semantic_similarity(recorded.body, incoming_body, embedding_fn=embedding_fn)
+        return sim >= semantic_threshold
     return False

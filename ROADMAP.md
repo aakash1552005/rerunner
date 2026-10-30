@@ -67,10 +67,12 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 
 ---
 
-## ⏳ v0.4.0 — Semantic Drift Detection & Eval Exporter (Next Up)
+## ⏳ v0.4.0 — Semantic Drift Detection & Eval Exporter (In Progress)
+- [x] **Semantic Drift Tolerant Replay Matching**: Embedding and n-gram cosine similarity matching allowing prompt phrasing updates without failing CI (RFC #35)
+- [x] **Real-Time Terminal TUI Flight Deck**: Interactive erunner tui\ dashboard for visually inspecting multi-agent trajectories (Issue #36)
+- [x] **Enterprise Multi-Cloud Backends**: Microsoft Azure Blob Storage (\z://\) and AWS Bedrock Converse API adapter
+- [x] **Pluggable Sether PII Redaction Backend**: Protocol-based international phone and credit card masking (PR #37)
 - [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets (JSONL, HuggingFace, Argilla)
-- [ ] **Semantic Drift Alerting**: Embedding-based tolerant matching to alert when prompt alterations diverge from cassette intent
-- [ ] **Real-Time Terminal TUI Flight Deck**: Terminal UI dashboard for live stepping through multi-agent interactions
 
 ---
 

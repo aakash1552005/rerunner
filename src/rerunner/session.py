@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import contextvars
 import os
 from pathlib import Path
@@ -77,6 +79,8 @@ class Session:
         record_partial_streams: bool = False,
         matching_strategy: MatchingStrategy = "strict",
         pii_redactor: PiiRedactor | None = None,
+        semantic_threshold: float = 0.80,
+        embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
         self.cassette_path = Path(cassette_path)
         self.requested_mode = mode
@@ -86,6 +90,8 @@ class Session:
         self.record_partial_streams = record_partial_streams
         self.matching_strategy = matching_strategy
         self.pii_redactor = pii_redactor
+        self.semantic_threshold = semantic_threshold
+        self.embedding_fn = embedding_fn
 
         self.effective_mode: ResolvedMode = "record"
         self.transport: CassetteTransport
@@ -147,6 +153,8 @@ class Session:
             matching_strategy=self.matching_strategy,
             cassette=self.cassette,
             pii_redactor=self.pii_redactor,
+            semantic_threshold=self.semantic_threshold,
+            embedding_fn=self.embedding_fn,
         )
 
         self.async_transport = AsyncCassetteTransport(
@@ -158,6 +166,8 @@ class Session:
             matching_strategy=self.matching_strategy,
             cassette=self.cassette,
             pii_redactor=self.pii_redactor,
+            semantic_threshold=self.semantic_threshold,
+            embedding_fn=self.embedding_fn,
         )
 
         self._cassette_token = set_active_cassette(
@@ -250,6 +260,8 @@ def replay(
     auto_patch: bool = True,
     chunk_delay_ms: int = 0,
     matching_strategy: MatchingStrategy = "strict",
+    semantic_threshold: float = 0.80,
+    embedding_fn: Callable[[str], list[float]] | None = None,
 ) -> Session:
     """Return a Session configured in replay mode."""
     return Session(
@@ -258,6 +270,8 @@ def replay(
         auto_patch=auto_patch,
         chunk_delay_ms=chunk_delay_ms,
         matching_strategy=matching_strategy,
+        semantic_threshold=semantic_threshold,
+        embedding_fn=embedding_fn,
     )
 
 

@@ -10,11 +10,16 @@ import threading
 from typing import TYPE_CHECKING
 
 from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
+from rerunner.matcher import (
+    MatchingStrategy,
+    compute_semantic_similarity,
+    normalize_url,
+)
 from rerunner.models import CassetteEntry, CassetteMetadata
 from rerunner.storage import detect_compression, get_storage_backend
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 class CassetteError(Exception):
@@ -194,9 +199,18 @@ class Cassette:
             backend.write_bytes(self.uri, data_bytes)
 
     def find_http_match(
-        self, request_key: str, step: int | None = None, consume: bool = True
+        self,
+        request_key: str,
+        step: int | None = None,
+        consume: bool = True,
+        strategy: MatchingStrategy = "strict",
+        incoming_method: str | None = None,
+        incoming_url: str | None = None,
+        incoming_body: bytes | str | None = None,
+        semantic_threshold: float = 0.80,
+        embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> CassetteEntry | None:
-        """Find a recorded HTTP response matching the request key with per-key cursor support."""
+        """Find a recorded HTTP response matching the request key with per-key cursor and semantic drift support."""
         with self._lock:
             if step is not None:
                 for entry in self.entries:
@@ -219,15 +233,52 @@ class Cassette:
                 )
             ]
 
-            if not matching_entries:
-                return None
+            if matching_entries:
+                cursor = self._request_cursors.get(request_key, 0)
+                if cursor < len(matching_entries):
+                    entry = matching_entries[cursor]
+                    if consume:
+                        self._request_cursors[request_key] = cursor + 1
+                    return entry
 
-            cursor = self._request_cursors.get(request_key, 0)
-            if cursor < len(matching_entries):
-                entry = matching_entries[cursor]
-                if consume:
-                    self._request_cursors[request_key] = cursor + 1
-                return entry
+            # Fallback to semantic drift matching if enabled
+            if strategy == "semantic" and incoming_method is not None and incoming_url is not None:
+                norm_in_url = normalize_url(incoming_url)
+                best_entry: CassetteEntry | None = None
+                best_sim = -1.0
+                best_key = ""
+
+                for entry in self.entries:
+                    if (
+                        entry.entry_type == "http"
+                        and entry.request
+                        and entry.request.method.upper() == incoming_method.upper()
+                        and normalize_url(entry.request.url) == norm_in_url
+                    ):
+                        entry_key = entry.request.request_key
+                        # Check if this specific entry instance was already consumed
+                        cur_idx = self._request_cursors.get(entry_key, 0)
+                        # Find index of entry among entries with this key
+                        same_key_entries = [
+                            e
+                            for e in self.entries
+                            if e.request and e.request.request_key == entry_key
+                        ]
+                        if entry in same_key_entries and same_key_entries.index(entry) < cur_idx:
+                            continue
+
+                        sim = compute_semantic_similarity(
+                            entry.request.body, incoming_body, embedding_fn=embedding_fn
+                        )
+                        if sim >= semantic_threshold and sim > best_sim:
+                            best_sim = sim
+                            best_entry = entry
+                            best_key = entry_key
+
+                if best_entry is not None:
+                    if consume and best_key:
+                        self._request_cursors[best_key] = self._request_cursors.get(best_key, 0) + 1
+                    return best_entry
 
             return None
 

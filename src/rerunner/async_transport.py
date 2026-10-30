@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 import threading
 import time
@@ -206,6 +206,8 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
         matching_strategy: MatchingStrategy = "strict",
         cassette: Cassette | None = None,
         pii_redactor: PiiRedactor | None = None,
+        semantic_threshold: float = 0.80,
+        embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
         if chunk_delay_ms < 0:
             raise ValueError("chunk_delay_ms must be non-negative")
@@ -218,6 +220,8 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
         self.record_partial_streams = record_partial_streams
         self.matching_strategy: MatchingStrategy = matching_strategy
         self.pii_redactor = pii_redactor
+        self.semantic_threshold = semantic_threshold
+        self.embedding_fn = embedding_fn
         self._step_lock = threading.Lock()
         self._step_counter = 0
         self._active_recording_streams: list[_RecordingAsyncByteStream] = []
@@ -261,7 +265,15 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
                     f"Cassette file not found in replay mode: {self.cassette_path}"
                 )
 
-            match = self.cassette.find_http_match(request_key)
+            match = self.cassette.find_http_match(
+                request_key,
+                strategy=self.matching_strategy,
+                incoming_method=request.method,
+                incoming_url=str(request.url),
+                incoming_body=body_bytes,
+                semantic_threshold=self.semantic_threshold,
+                embedding_fn=self.embedding_fn,
+            )
             if match is None or match.response is None:
                 raise CassetteError(
                     f"[Async Step {current_step}] No cassette match found in replay mode for "
