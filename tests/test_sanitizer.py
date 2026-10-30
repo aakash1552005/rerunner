@@ -251,11 +251,39 @@ class _CountingRedactor:
         return text
 
 
-def test_sanitize_chunks_rescans_a_bounded_amount_of_text() -> None:
+def _event_stream(shape: str) -> list[str]:
+    """Chunk 800 SSE events holding an email so that no chunk sanitizes correctly on its own."""
     chunks: list[str] = []
     for index in range(800):
-        chunks.extend([f'data: {{"email":"user{index}@', 'example.org"}\n\n'])
+        if shape == "value split in two":
+            chunks.extend([f'data: {{"email":"user{index}@', 'example.org"}\n\n'])
+        elif shape == "boundary at the end of the value":
+            chunks.extend([f'data: {{"email":"user{index}@', "example.org", '"}\n\n'])
+        elif shape == "every chunk ends inside a value":
+            # Each chunk starts with the previous value's end and ends with the next one's start
+            chunks.append(f'ple.org"}}\n\ndata: {{"email":"user{index}@exam')
+        else:
+            # Each chunk ends in text that is already a valid email on its own
+            chunks.append(f'm"}}\n\ndata: {{"email":"user{index}@example.co')
+    if shape == "every chunk ends inside a value":
+        chunks.append('ple.org"}\n\n')
+    elif shape == "every chunk ends at a valid prefix of the value":
+        chunks.append('m"}\n\n')
     chunks.append("data: [DONE]\n\n")
+    return chunks
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "value split in two",
+        "boundary at the end of the value",
+        "every chunk ends inside a value",
+        "every chunk ends at a valid prefix of the value",
+    ],
+)
+def test_sanitize_chunks_rescans_a_bounded_amount_of_text(shape: str) -> None:
+    chunks = _event_stream(shape)
     joined = "".join(chunks)
     redactor = _CountingRedactor()
 
@@ -263,10 +291,19 @@ def test_sanitize_chunks_rescans_a_bounded_amount_of_text() -> None:
 
     assert "".join(cleaned) == sanitize_string(joined)
     assert len(cleaned) == len(chunks)
-    assert cleaned[14:16] == ['data: {"email":"', '[REDACTED_EMAIL]"}\n\n']
-    # Every chunk once, the joined text once, and settling that only looks back to the last
-    # boundary known to line up. Rescanning from the start would scan hundreds of times more.
+    # Every chunk once, the joined text once, and rescans that only look back to the last
+    # boundary confirmed to line up. Rescanning from the start would scan hundreds of times more.
     assert redactor.scanned <= 5 * len(joined)
+
+
+def test_sanitize_chunks_hands_a_continued_value_to_the_previous_chunk() -> None:
+    # The email runs one character into the second chunk, which also holds the next event
+    chunks = ["data: a@b.co", 'm"}\n\ndata: x@y.org', '"}\n\n']
+    assert sanitize_chunks(chunks) == [
+        "data: [REDACTED_EMAIL]",
+        '"}\n\ndata: [REDACTED_EMAIL]',
+        '"}\n\n',
+    ]
 
 
 def test_sanitize_payload_keeps_records_when_keys_collide() -> None:
