@@ -212,6 +212,32 @@ class LangChainAdapter:
 
 
 @register_adapter
+class LangGraphAdapter:
+    """Built-in adapter for LangGraph StateGraph workflows."""
+
+    adapter_name = "langgraph"
+
+    @classmethod
+    def can_wrap(cls, client: Any) -> bool:
+        module_name = getattr(type(client), "__module__", "").lower()
+        return "langgraph" in module_name or hasattr(client, "checkpointer")
+
+    @classmethod
+    def wrap(
+        cls,
+        client: Any,
+        cassette_path: Path | str,
+        mode: Literal["record", "replay", "fork"] = "replay",
+        fork_step: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        from rerunner.integrations.langgraph import wrap_langgraph_graph
+
+        replay_mode: Literal["record", "replay"] = "record" if mode == "record" else "replay"
+        return wrap_langgraph_graph(client, cassette_path=cassette_path, mode=replay_mode)
+
+
+@register_adapter
 class AutoGenAdapter:
     """Built-in adapter for Microsoft AutoGen / AG2 agents and clients."""
 
@@ -293,13 +319,25 @@ class HTTPXAdapter:
         **kwargs: Any,
     ) -> Any:
         is_async = isinstance(client, httpx.AsyncClient)
+        existing_transport = getattr(client, "_transport", None)
+        # Preserve existing custom transport (e.g. MockTransport in tests) as real_transport
+        real_transport = kwargs.pop("real_transport", existing_transport)
+
         if is_async:
             client._transport = AsyncCassetteTransport(
-                cassette_path=cassette_path, mode=mode, fork_step=fork_step
+                cassette_path=cassette_path,
+                mode=mode,
+                fork_step=fork_step,
+                real_transport=real_transport,
+                **kwargs,
             )
         else:
             client._transport = CassetteTransport(
-                cassette_path=cassette_path, mode=mode, fork_step=fork_step
+                cassette_path=cassette_path,
+                mode=mode,
+                fork_step=fork_step,
+                real_transport=real_transport,
+                **kwargs,
             )
         if hasattr(client, "_mounts"):
             client._mounts.clear()

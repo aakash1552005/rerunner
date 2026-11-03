@@ -345,18 +345,26 @@ from rerunner.integrations import wrap_bedrock_client
 client = wrap_bedrock_client(bedrock_client, "cassettes/bedrock.jsonl", mode="replay")
 ```
 
-#### 🦜️🔗 LangChain & LangGraph
+#### 🦜️🔗 LangChain & LangGraph State Checkpointing
+
 ```python
-# Direct model wrapping
+# 1. Multi-Agent State Checkpointing for LangGraph
+from rerunner.integrations.langgraph import RerunnerCheckpointer, wrap_langgraph_graph
+
+# Deterministically record or replay multi-agent cyclic decision graphs
+app = wrap_langgraph_graph(workflow.compile(), "cassettes/langgraph.jsonl", mode="replay")
+output = app.invoke({"messages": [("user", "Summarize research paper")]})
+
+# 2. Or wrap LangChain chat models directly
 from langchain_openai import ChatOpenAI
 from rerunner.integrations import wrap_langchain_model
 
-llm = wrap_langchain_model(ChatOpenAI(model="gpt-4o"), "cassettes/langgraph.jsonl", mode="replay")
+llm = wrap_langchain_model(ChatOpenAI(model="gpt-4o"), "cassettes/langchain.jsonl", mode="replay")
 
-# Or callback handler for graph nodes
+# 3. Or callback handler for graph nodes
 from rerunner.integrations import RerunnerCallbackHandler
 
-handler = RerunnerCallbackHandler("cassettes/langgraph.jsonl", mode="replay")
+handler = RerunnerCallbackHandler("cassettes/langchain_callbacks.jsonl", mode="replay")
 graph.invoke({"input": "research quantum computing"}, config={"callbacks": [handler]})
 ```
 
