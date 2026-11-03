@@ -66,7 +66,7 @@ def test_wrap_custom_provider_adapter(tmp_path):
             return isinstance(client, MockCustomClient)
 
         @classmethod
-        def wrap(cls, client: Any, cassette_path: Any, mode: str = "replay", **kwargs) -> Any:
+        def wrap(cls, client: Any, cassette_path: Any, mode: str = "replay", **kwargs: Any) -> Any:
             client.wrapped = True
             client.mode = mode
             client.cassette = cassette_path

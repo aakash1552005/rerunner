@@ -8,8 +8,8 @@ from typer.testing import CliRunner
 
 from rerunner.cli import app
 from rerunner.eval_exporter import export_cassette_to_eval_format
-from rerunner.cassette import Cassette, CassetteEntry
-from rerunner.models import RecordedRequest, RecordedResponse
+from rerunner.cassette import Cassette
+from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
 
 runner = CliRunner()
 

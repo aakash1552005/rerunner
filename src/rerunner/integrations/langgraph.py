@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from collections.abc import AsyncIterator, Iterator
 
 from rerunner.cassette import Cassette
 from rerunner.models import CassetteEntry
-
-if TYPE_CHECKING:
-    pass
 
 try:
     from langgraph.checkpoint.base import (

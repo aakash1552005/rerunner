@@ -11,7 +11,7 @@ Steps to add a new provider:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 import httpx
 
 from rerunner import wrap
@@ -29,7 +29,8 @@ class ExampleProviderClient:
         resp = self.http_client.post(
             "https://api.example-provider.ai/v1/generate", json={"prompt": prompt}
         )
-        return resp.json()
+        data: dict[str, Any] = resp.json()
+        return data
 
 
 # 2. Example Provider Adapter
@@ -42,7 +43,13 @@ class ExampleProviderAdapter:
         return isinstance(client, ExampleProviderClient)
 
     @classmethod
-    def wrap(cls, client: Any, cassette_path: Any, mode: str = "replay", **kwargs: Any) -> Any:
+    def wrap(
+        cls,
+        client: Any,
+        cassette_path: Any,
+        mode: Literal["record", "replay", "fork"] = "replay",
+        **kwargs: Any,
+    ) -> Any:
         wrap(client.http_client, cassette_path=cassette_path, mode=mode, **kwargs)
         return client
 
