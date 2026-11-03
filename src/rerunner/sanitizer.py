@@ -522,12 +522,20 @@ def sanitize_pii(
     try:
         from presidio_analyzer import AnalyzerEngine
         from presidio_anonymizer import AnonymizerEngine
+        from presidio_anonymizer.entities import OperatorConfig
 
         analyzer = AnalyzerEngine()
         anonymizer = AnonymizerEngine()
         results = analyzer.analyze(text=text, entities=target_entities, language="en")
-        anonymized = anonymizer.anonymize(text=text, analyzer_results=results)
-        return str(anonymized.text)
+        operators = {
+            "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "[REDACTED_EMAIL]"}),
+            "PHONE_NUMBER": OperatorConfig("replace", {"new_value": "[REDACTED_PHONE]"}),
+            "CREDIT_CARD": OperatorConfig("replace", {"new_value": "[REDACTED_CREDIT_CARD]"}),
+            "US_SSN": OperatorConfig("replace", {"new_value": "[REDACTED_SSN]"}),
+            "IP_ADDRESS": OperatorConfig("replace", {"new_value": "[REDACTED_IP]"}),
+        }
+        anonymized = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)
+        return sanitize_string(str(anonymized.text))
     except ImportError:
         pass
 
