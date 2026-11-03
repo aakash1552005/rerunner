@@ -111,6 +111,34 @@ Testing production AI agents and running them in Continuous Integration (CI) cre
 
 ---
 
+## ⚡ Performance & Cost Reduction Benchmarks
+
+Every AI agent test run in CI consumes live network round-trips and expensive model tokens. Rerunner eliminates both completely:
+
+| Metric | Live LLM Calls (OpenAI/Anthropic) | Rerunner Replay (Air-Gapped) | Improvement |
+| :--- | :---: | :---: | :---: |
+| **Average Step Latency** | `~350 ms` | **`0.22 ms - 0.57 ms`** | **⚡ 600x – 1,600x Faster** |
+| **Token Cost** | `~$5.00 / 100k tokens` | **$0.00** | **💰 100% Token Cost Reduction** |
+| **Network Flakiness** | High (Rate limits, DNS, Outages) | **Zero (0 network calls)** | **🔒 100% Deterministic** |
+| **Side-Effect Risk** | High (Accidental DB mutations) | **Guarded (`@side_effect`)** | **🛡️ Fail-Closed Safety** |
+
+> Measured on Python 3.12 across 10 sequential agent reasoning steps. Run locally with `uv run python benchmarks/bench_replay_latency.py`.
+
+---
+
+## 📚 Runnable Cookbooks & Examples
+
+Explore standalone, ready-to-run cookbooks in the [`examples/`](examples/) directory:
+
+| Cookbook | Framework | Description |
+| :--- | :--- | :--- |
+| **[`01_openai_quickstart.py`](examples/01_openai_quickstart.py)** | OpenAI SDK | End-to-end recording and replay of chat completions with zero network access. |
+| **[`02_anthropic_sse_streaming.py`](examples/02_anthropic_sse_streaming.py)** | Anthropic Claude SDK | Token-by-token Server-Sent Events (SSE) streaming replay with configurable latency pacing. |
+| **[`03_mcp_sqlite_replayer.py`](examples/03_mcp_sqlite_replayer.py)** | Model Context Protocol | Deterministic MCP tool invocation record/replay without starting database servers. |
+| **[`04_chaos_fault_injection.py`](examples/04_chaos_fault_injection.py)** | Chaos Engineering | Simulating upstream HTTP 429 rate limits, exponential backoff, and agent model fallback. |
+
+---
+
 ## 🔍 Scope & Limitations
 
 * **Transport Layer**: Rerunner intercepts `httpx.BaseTransport` and `httpx.AsyncBaseTransport`. This covers the official Python SDKs for Anthropic Claude, OpenAI, and Google GenAI.

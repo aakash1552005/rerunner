@@ -32,8 +32,7 @@ def _patched_client_init(self: httpx.Client, *args: Any, **kwargs: Any) -> None:
         and kwargs.get("transport") is None
     ):
         kwargs["transport"] = session.transport
-        if "mounts" not in kwargs or kwargs["mounts"] is None:
-            kwargs["mounts"] = {}
+        kwargs["mounts"] = {}
 
     _ORIGINAL_SYNC_INIT(self, *args, **kwargs)
 
@@ -49,8 +48,7 @@ def _patched_async_client_init(self: httpx.AsyncClient, *args: Any, **kwargs: An
         and kwargs.get("transport") is None
     ):
         kwargs["transport"] = session.async_transport
-        if "mounts" not in kwargs or kwargs["mounts"] is None:
-            kwargs["mounts"] = {}
+        kwargs["mounts"] = {}
 
     _ORIGINAL_ASYNC_INIT(self, *args, **kwargs)
 

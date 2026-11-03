@@ -39,16 +39,26 @@ def wrap_openai(
     else:
         transport = CassetteTransport(cassette_path=cassette_path, mode=mode, fork_step=fork_step)
 
-    if hasattr(client, "_client"):
-        http_client = client._client
-        http_client._transport = transport
-        # Clear any proxy mounts (e.g. HTTPS_PROXY) so traffic routes through cassette transport
-        if hasattr(http_client, "_mounts"):
-            http_client._mounts.clear()
+    # Convert settings to string/standard primitives to guarantee compatibility across httpx versions
+    old_client = getattr(client, "_client", None)
+    client_kwargs: dict[str, Any] = {"transport": transport}
+
+    if old_client is not None:
+        raw_base_url = getattr(old_client, "base_url", None)
+        if raw_base_url:
+            client_kwargs["base_url"] = str(raw_base_url)
+
+        raw_timeout = getattr(old_client, "timeout", None)
+        if raw_timeout is not None:
+            client_kwargs["timeout"] = float(getattr(raw_timeout, "read", 60.0))
+
+        raw_headers = getattr(old_client, "headers", None)
+        if raw_headers is not None:
+            client_kwargs["headers"] = dict(raw_headers)
+
+    if is_async:
+        client._client = httpx.AsyncClient(**client_kwargs)
     else:
-        if is_async:
-            client._client = httpx.AsyncClient(transport=transport)  # type: ignore[arg-type]
-        else:
-            client._client = httpx.Client(transport=transport)  # type: ignore[arg-type]
+        client._client = httpx.Client(**client_kwargs)
 
     return client
