@@ -52,3 +52,13 @@ dmypy.json
 *.cassette.local.jsonl
 temp_cassette*
 .temp/
+
+# Secrets, credentials & environment files
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.token
+*.cert
+*.secrets
