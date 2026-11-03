@@ -455,6 +455,9 @@ rerunner verify session.jsonl
 # Export cassette into OpenTelemetry (OTel) OTLP trace JSON format
 rerunner export-otel session.jsonl -o session.otel.json
 
+# Export recorded conversations into fine-tuning & evaluation datasets (OpenAI / ShareGPT / Alpaca)
+rerunner export-eval session.jsonl -o session.eval.jsonl --format openai
+
 # Visually play back agent execution steps in terminal with Rich styling
 rerunner play session.jsonl
 ```

@@ -506,6 +506,51 @@ def export_otel(
         sys.exit(1)
 
 
+@app.command(name="export-eval")
+def export_eval(
+    cassette_path: Path = typer.Argument(..., help="Path to the .jsonl cassette file"),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Destination path for exported JSONL file. Defaults to <cassette>.eval.jsonl",
+    ),
+    format_type: str = typer.Option(
+        "openai",
+        "--format",
+        "-f",
+        help="Evaluation dataset format: 'openai' (chat jsonl), 'sharegpt', or 'huggingface' (alpaca)",
+    ),
+) -> None:
+    """Export recorded conversations from cassettes into LLM fine-tuning and evaluation datasets."""
+    from rerunner.eval_exporter import export_cassette_to_eval_format
+
+    try:
+        if format_type not in ("openai", "sharegpt", "huggingface"):
+            console.print(
+                f"[bold red]Unsupported format '[/]{format_type}[bold red]'. Must be 'openai', 'sharegpt', or 'huggingface'.[/]"
+            )
+            raise typer.Exit(code=1)
+
+        target = output_path or cassette_path.with_suffix(".eval.jsonl")
+        result = export_cassette_to_eval_format(cassette_path, target, format_type=format_type)  # type: ignore[arg-type]
+
+        console.print(
+            Panel(
+                f"[bold green]✔ Successfully exported cassette to {format_type.upper()} eval format![/]\n"
+                f"[bold cyan]Source:[/] {cassette_path}\n"
+                f"[bold cyan]Destination:[/] {target}\n"
+                f"[bold cyan]Total Records:[/] {result['exported_records']}\n"
+                f"[dim]Ready for fine-tuning, OpenAI evals, or Hugging Face dataset loading.[/]",
+                title="🎯 LLM Eval & Fine-Tuning Export",
+                border_style="green",
+            )
+        )
+    except Exception as exc:
+        console.print(f"[bold red]Error exporting eval dataset:[/] {exc}")
+        sys.exit(1)
+
+
 @app.command()
 def doctor() -> None:
     """Run diagnostic checks on your environment, installed SDKs, and storage backends."""
