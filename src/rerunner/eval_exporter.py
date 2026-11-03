@@ -13,7 +13,8 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from rerunner.cassette import Cassette, CassetteEntry
+from rerunner.cassette import Cassette
+from rerunner.models import CassetteEntry
 
 
 def _extract_messages_from_entry(entry: CassetteEntry) -> tuple[list[dict[str, str]], str | None]:
@@ -53,7 +54,7 @@ def _extract_messages_from_entry(entry: CassetteEntry) -> tuple[list[dict[str, s
                     messages.append({"role": role, "content": text})
             elif "prompt" in req_data and isinstance(req_data["prompt"], str):
                 messages.append({"role": "user", "content": req_data["prompt"]})
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):  # nosec B110
         # If not JSON, ignore request body
         pass
 
@@ -89,7 +90,7 @@ def _extract_messages_from_entry(entry: CassetteEntry) -> tuple[list[dict[str, s
                 assistant_output = "".join(
                     p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p
                 )
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):  # nosec B110
         # If not JSON or raw string
         pass
 

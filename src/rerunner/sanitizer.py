@@ -525,7 +525,7 @@ def sanitize_pii(
         from presidio_anonymizer.entities import OperatorConfig
 
         analyzer = AnalyzerEngine()
-        anonymizer = AnonymizerEngine()
+        anonymizer = AnonymizerEngine()  # type: ignore[no-untyped-call]
         results = analyzer.analyze(text=text, entities=target_entities, language="en")
         operators = {
             "EMAIL_ADDRESS": OperatorConfig("replace", {"new_value": "[REDACTED_EMAIL]"}),
@@ -534,7 +534,7 @@ def sanitize_pii(
             "US_SSN": OperatorConfig("replace", {"new_value": "[REDACTED_SSN]"}),
             "IP_ADDRESS": OperatorConfig("replace", {"new_value": "[REDACTED_IP]"}),
         }
-        anonymized = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)
+        anonymized = anonymizer.anonymize(text=text, analyzer_results=results, operators=operators)  # type: ignore[arg-type]
         return sanitize_string(str(anonymized.text))
     except ImportError:
         pass

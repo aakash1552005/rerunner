@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, TypeVar, runtime_checkable
 import httpx
 
 from rerunner.async_transport import AsyncCassetteTransport
@@ -36,10 +36,11 @@ class BaseProviderAdapter(Protocol):
         ...
 
 
-_ADAPTER_REGISTRY: list[type[BaseProviderAdapter]] = []
+_ADAPTER_REGISTRY: list[Any] = []
+AdapterT = TypeVar("AdapterT")
 
 
-def register_adapter(adapter_cls: type[BaseProviderAdapter]) -> type[BaseProviderAdapter]:
+def register_adapter(adapter_cls: AdapterT) -> AdapterT:
     """Register a custom model or framework adapter with Rerunner's unified wrap engine.
 
     Example:
@@ -61,7 +62,7 @@ def register_adapter(adapter_cls: type[BaseProviderAdapter]) -> type[BaseProvide
     return adapter_cls
 
 
-def get_registered_adapters() -> list[type[BaseProviderAdapter]]:
+def get_registered_adapters() -> list[Any]:
     """Return all currently registered provider adapters."""
     return list(_ADAPTER_REGISTRY)
 
@@ -206,7 +207,7 @@ class LangChainAdapter:
         from rerunner.integrations.langchain import wrap_langchain_model
 
         return wrap_langchain_model(
-            client, cassette_path=cassette_path, mode=mode, fork_step=fork_step
+            client, cassette_path=str(cassette_path), mode=mode, fork_step=fork_step
         )
 
 
@@ -326,34 +327,37 @@ def wrap(
     """
     for adapter in _ADAPTER_REGISTRY:
         try:
-            if adapter.can_wrap(client):
-                return adapter.wrap(
-                    client,
-                    cassette_path=cassette_path,
-                    mode=mode,
-                    fork_step=fork_step,
-                    **kwargs,
-                )
-        except Exception:
-            # If adapter check encountered an inspection error, continue checking
-            continue
+            can_handle = adapter.can_wrap(client)
+        except (AttributeError, TypeError, ValueError):
+            can_handle = False
+
+        if can_handle:
+            return adapter.wrap(
+                client,
+                cassette_path=cassette_path,
+                mode=mode,
+                fork_step=fork_step,
+                **kwargs,
+            )
 
     # Secondary check: if client has an inner _client that can be wrapped
     inner_client = getattr(client, "_client", None)
     if inner_client is not None:
         for adapter in _ADAPTER_REGISTRY:
             try:
-                if adapter.can_wrap(inner_client):
-                    adapter.wrap(
-                        inner_client,
-                        cassette_path=cassette_path,
-                        mode=mode,
-                        fork_step=fork_step,
-                        **kwargs,
-                    )
-                    return client
-            except Exception:
-                continue
+                can_handle_inner = adapter.can_wrap(inner_client)
+            except (AttributeError, TypeError, ValueError):
+                can_handle_inner = False
+
+            if can_handle_inner:
+                adapter.wrap(
+                    inner_client,
+                    cassette_path=cassette_path,
+                    mode=mode,
+                    fork_step=fork_step,
+                    **kwargs,
+                )
+                return client
 
     raise TypeError(
         f"Unable to auto-detect adapter for client type '{type(client).__name__}'. "
