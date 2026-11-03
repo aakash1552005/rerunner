@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette, CassetteError
+from rerunner.integrations.base import wrap
 from rerunner.otel import (
     compute_cassette_metrics,
     export_cassette_to_otel_file,
@@ -76,4 +77,5 @@ __all__ = [
     "sanitize_string",
     "sanitize_url",
     "side_effect",
+    "wrap",
 ]
