@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 import dataclasses
 import json
+import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -123,6 +124,49 @@ class PiiRedactor(Protocol):
         ...
 
 
+def get_env_redact_patterns() -> list[tuple[re.Pattern[str], str]]:
+    """Parse custom redaction patterns from the RERUNNER_REDACT_PATTERNS environment variable.
+
+    Supports JSON list format (e.g. '["corp_secret_[a-zA-Z0-9]+", "acme_key_[0-9]+"]').
+    List items may be a regex string, a 2-element [pattern, replacement] list/tuple,
+    or a {"pattern": ..., "replacement": ...} dictionary.
+    Defaults the replacement placeholder to '[REDACTED]'.
+    """
+    raw = os.getenv("RERUNNER_REDACT_PATTERNS")
+    if not raw or not raw.strip():
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for item in data:
+        if isinstance(item, str):
+            try:
+                patterns.append((re.compile(item), "[REDACTED]"))
+            except re.error:
+                continue
+        elif (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], str)
+        ):
+            try:
+                patterns.append((re.compile(item[0]), item[1]))
+            except re.error:
+                continue
+        elif isinstance(item, dict) and "pattern" in item and isinstance(item["pattern"], str):
+            repl = str(item.get("replacement", "[REDACTED]"))
+            try:
+                patterns.append((re.compile(item["pattern"]), repl))
+            except re.error:
+                continue
+    return patterns
+
+
 def sanitize_string(
     text: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
@@ -157,10 +201,16 @@ def sanitize_string(
     for pattern, replacement in SECRET_PATTERNS:
         sanitized = pattern.sub(replacement, sanitized)
 
-    # Apply custom user patterns if supplied
+    # Apply custom user patterns and environment variable patterns
+    all_custom: list[tuple[re.Pattern[str], str]] = []
     if custom_patterns:
-        for pattern, replacement in custom_patterns:
-            sanitized = pattern.sub(replacement, sanitized)
+        all_custom.extend(custom_patterns)
+    env_patterns = get_env_redact_patterns()
+    if env_patterns:
+        all_custom.extend(env_patterns)
+
+    for pattern, replacement in all_custom:
+        sanitized = pattern.sub(replacement, sanitized)
 
     # Apply the optional PII backend after the built-in patterns
     if pii_redactor is not None:
@@ -470,7 +520,7 @@ def find_sensitive_leaks(
                 _collect_strings(item)
 
     _collect_strings(data)
-    patterns = SECRET_PATTERNS + (custom_patterns or [])
+    patterns = SECRET_PATTERNS + (custom_patterns or []) + get_env_redact_patterns()
 
     for text in text_to_scan:
         for match in _CARD_REGEX.finditer(text):
@@ -627,3 +677,7 @@ class SetherRedactor:
             cursor = end
         pieces.append(text[cursor:])
         return "".join(pieces)
+
+
+# Alias for backward compatibility with tutorial and generic payload sanitization
+sanitize_data = sanitize_payload
