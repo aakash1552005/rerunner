@@ -105,3 +105,40 @@ def test_cli_tui_render(temp_cassette_path: Path) -> None:
     assert "RERUNNER AGENT FLIGHT DECK" in result.output
     assert "Step 1" in result.output
     assert "Tokens Replayed: 42" in result.output
+
+
+def test_cli_cost_export_html(tmp_path: Path) -> None:
+    from rerunner.cassette import Cassette
+    from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+    cass_file = tmp_path / "test_cost.jsonl"
+    cass = Cassette(cass_file)
+    cass.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST", url="https://api.openai.com/v1/chat/completions", headers={}
+            ),
+            response=RecordedResponse(
+                status_code=200,
+                headers={},
+                body='{"usage": {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200}}',
+            ),
+        )
+    )
+    cass.save()
+
+    html_out = tmp_path / "reports" / "savings.html"
+    result = runner.invoke(app, ["cost", str(cass_file), "--export-html", str(html_out)])
+    assert result.exit_code == 0
+    assert "Standalone HTML savings report exported to" in result.output
+    assert html_out.exists()
+
+    content = html_out.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in content
+    assert "Rerunner Replay Savings Report" in content
+    assert "200" in content
+    assert "120" in content
+    assert "80" in content
+    assert "Detailed Replay vs Live API Comparison" in content

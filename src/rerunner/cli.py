@@ -22,25 +22,34 @@ from rerunner.sanitizer import (
     sanitize_string,
     sanitize_url,
 )
+from rerunner.reports import export_cost_html_report
 
 
-def _extract_tokens_from_body(body_str: str) -> int | None:
+def _extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
+    result = {"prompt": 0, "completion": 0, "total": 0}
     if not body_str:
-        return None
+        return result
     try:
         data = json.loads(body_str)
         if isinstance(data, dict):
             usage = data.get("usage")
             if isinstance(usage, dict):
-                if "total_tokens" in usage and isinstance(usage["total_tokens"], int):
-                    return usage["total_tokens"]
                 prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
                 comp = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-                if prompt or comp:
-                    return int(prompt) + int(comp)
+                total = usage.get("total_tokens")
+                if total is None or not isinstance(total, int):
+                    total = int(prompt) + int(comp)
+                result["prompt"] = int(prompt) if isinstance(prompt, (int, float)) else 0
+                result["completion"] = int(comp) if isinstance(comp, (int, float)) else 0
+                result["total"] = int(total)
     except (json.JSONDecodeError, TypeError, ValueError, KeyError):
         pass
-    return None
+    return result
+
+
+def _extract_tokens_from_body(body_str: str) -> int | None:
+    tokens = _extract_detailed_tokens_from_body(body_str)["total"]
+    return tokens if tokens > 0 else None
 
 
 def _extract_entry_info(entry: CassetteEntry) -> dict[str, Any]:
@@ -761,6 +770,11 @@ def cost(
         "--ci-summary",
         help="Automatically append markdown report to $GITHUB_STEP_SUMMARY if available.",
     ),
+    export_html: Path | None = typer.Option(
+        None,
+        "--export-html",
+        help="Destination path to export standalone HTML token & cost savings report.",
+    ),
 ) -> None:
     """Calculate token savings, latency saved, and estimated API dollar cost avoided via replay."""
     cassette_files: list[Path] = []
@@ -779,6 +793,8 @@ def cost(
     total_http = 0
     total_tools = 0
     total_tokens = 0
+    prompt_tokens = 0
+    completion_tokens = 0
     total_latency_ms = 0.0
 
     for path in cassette_files:
@@ -788,9 +804,11 @@ def cost(
             for entry in cassette.entries:
                 if entry.entry_type == "http" and entry.response:
                     total_http += 1
-                    t = _extract_tokens_from_body(entry.response.body)
-                    if t:
-                        total_tokens += t
+                    t_info = _extract_detailed_tokens_from_body(entry.response.body)
+                    if t_info["total"]:
+                        total_tokens += t_info["total"]
+                        prompt_tokens += t_info["prompt"]
+                        completion_tokens += t_info["completion"]
                     total_latency_ms += (
                         sum(entry.response.chunk_delays_ms)
                         if entry.response.chunk_delays_ms
@@ -805,6 +823,22 @@ def cost(
     # Blended estimate: $5.00 per 1M tokens average across modern frontier models
     estimated_cost_usd = (total_tokens / 1_000_000.0) * 5.0
     latency_sec = total_latency_ms / 1000.0
+
+    if export_html:
+        export_cost_html_report(
+            output_path=export_html,
+            cassette_count=len(cassette_files),
+            total_steps=total_steps,
+            total_http=total_http,
+            total_tools=total_tools,
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            latency_sec=latency_sec,
+            target_label=str(target_path),
+        )
+        console.print(f"[bold green]✔ Standalone HTML savings report exported to:[/] {export_html}")
 
     if markdown or ci_summary:
         md = [

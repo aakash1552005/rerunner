@@ -10,6 +10,7 @@ from rerunner.otel import (
     export_cassette_to_otel_file,
     export_to_otlp,
 )
+from rerunner.reports import export_cost_html_report, generate_cost_html_report
 from rerunner.sanitizer import (
     SECRET_PATTERNS,
     SENSITIVE_HEADERS,
@@ -65,8 +66,10 @@ __all__ = [
     "__version__",
     "compute_cassette_metrics",
     "export_cassette_to_otel_file",
+    "export_cost_html_report",
     "export_to_otlp",
     "fork",
+    "generate_cost_html_report",
     "get_storage_backend",
     "record",
     "record_tool",
