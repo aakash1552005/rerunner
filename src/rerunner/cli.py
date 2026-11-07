@@ -386,6 +386,12 @@ def diff(
 @app.command()
 def stats(
     cassette_path: Path = typer.Argument(..., help="Path to the .jsonl cassette file"),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output cassette statistics as JSON to stdout.",
+    ),
 ) -> None:
     """Calculate token savings, latency savings, and cost reductions achieved by replaying."""
     try:
@@ -410,6 +416,20 @@ def stats(
     est_dollars_saved = (est_tokens / 1_000_000) * 10.0
     # Average live LLM network call takes ~1.8 seconds vs 0.001s replay
     time_saved_seconds = http_steps * 1.8
+
+    if json_output:
+        data = {
+            "cassette": str(cassette_path),
+            "total_steps": len(cassette.entries),
+            "http_steps": http_steps,
+            "side_effect_steps": side_effect_steps,
+            "estimated_tokens_saved": est_tokens,
+            "estimated_cost_saved_usd": round(est_dollars_saved, 4),
+            "estimated_time_saved_seconds": round(time_saved_seconds, 2),
+            "metadata": cassette.metadata.model_dump() if cassette.metadata else None,
+        }
+        typer.echo(json.dumps(data, indent=2))
+        return
 
     stats_table = Table(
         title="CI Replay Efficiency & Savings", show_header=True, header_style="bold green"

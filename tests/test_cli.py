@@ -105,3 +105,64 @@ def test_cli_tui_render(temp_cassette_path: Path) -> None:
     assert "RERUNNER AGENT FLIGHT DECK" in result.output
     assert "Step 1" in result.output
     assert "Tokens Replayed: 42" in result.output
+
+
+def test_cli_stats_table_and_json(temp_cassette_path: Path) -> None:
+    import json
+    from rerunner.cassette import Cassette
+    from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+    cassette = Cassette(temp_cassette_path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST",
+                url="https://api.openai.com/v1/chat/completions",
+                headers={},
+                body='{"messages": [{"role": "user", "content": "hello"}]}',
+            ),
+            response=RecordedResponse(
+                status_code=200,
+                headers={},
+                body='{"choices": [{"message": {"content": "world"}}]}',
+            ),
+        )
+    )
+    cassette.append(
+        CassetteEntry(
+            step=2,
+            entry_type="side_effect",
+            side_effect_name="fetch_user",
+            side_effect_args=[123],
+            side_effect_result={"name": "Alice"},
+        )
+    )
+    cassette.save()
+
+    # 1. Default table output
+    result_table = runner.invoke(app, ["stats", str(temp_cassette_path)])
+    assert result_table.exit_code == 0
+    assert "CI Replay Efficiency & Savings" in result_table.output
+    assert "Total Recorded Steps" in result_table.output
+
+    # 2. JSON output with --json flag
+    result_json = runner.invoke(app, ["stats", str(temp_cassette_path), "--json"])
+    assert result_json.exit_code == 0
+    data = json.loads(result_json.output)
+    assert data["cassette"] == str(temp_cassette_path)
+    assert data["total_steps"] == 2
+    assert data["http_steps"] == 1
+    assert data["side_effect_steps"] == 1
+    assert data["estimated_tokens_saved"] > 0
+    assert "estimated_cost_saved_usd" in data
+    assert "estimated_time_saved_seconds" in data
+    assert "metadata" in data
+    assert data["metadata"]["format_version"] == "1.1.0"
+
+    # 3. Short flag -j
+    result_short = runner.invoke(app, ["stats", str(temp_cassette_path), "-j"])
+    assert result_short.exit_code == 0
+    data_short = json.loads(result_short.output)
+    assert data_short == data
