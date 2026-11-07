@@ -11,8 +11,11 @@ import pytest
 
 from rerunner.sanitizer import (
     SetherRedactor,
+    find_sensitive_leaks,
+    get_env_redact_patterns,
     sanitize_body,
     sanitize_chunks,
+    sanitize_data,
     sanitize_headers,
     sanitize_payload,
     sanitize_string,
@@ -85,6 +88,68 @@ def test_sanitize_with_custom_patterns() -> None:
     text = "Project ticket is INTERNAL-9876"
     cleaned = sanitize_string(text, custom_patterns=custom)
     assert cleaned == "Project ticket is [REDACTED_INTERNAL_ID]"
+
+
+def test_sanitize_with_env_redact_patterns_json_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    patterns = json.dumps(["corp_secret_[a-zA-Z0-9]+", "acme_key_[0-9]+"])
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", patterns)
+
+    text = "Payload with corp_secret_Abc123Xyz and acme_key_987654 inside."
+    cleaned = sanitize_string(text)
+    assert "corp_secret_Abc123Xyz" not in cleaned
+    assert "acme_key_987654" not in cleaned
+    assert cleaned == "Payload with [REDACTED] and [REDACTED] inside."
+
+
+def test_sanitize_data_alias_with_env_redact_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
+    patterns = json.dumps(["corp_token_[a-zA-Z0-9]+"])
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", patterns)
+
+    raw_payload = {
+        "token": "corp_token_xyz999",
+        "nested": {"key": "corp_token_abc111"},
+        "count": 42,
+    }
+    cleaned = sanitize_data(raw_payload)
+    assert cleaned["token"] == "[REDACTED]"
+    assert cleaned["nested"]["key"] == "[REDACTED]"
+    assert cleaned["count"] == 42
+
+
+def test_env_redact_patterns_custom_replacements(monkeypatch: pytest.MonkeyPatch) -> None:
+    patterns = json.dumps(
+        [
+            ["internal_key_[0-9]+", "[REDACTED_INTERNAL]"],
+            {"pattern": "tenant_[0-9]{4}", "replacement": "[REDACTED_TENANT]"},
+        ]
+    )
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", patterns)
+
+    text = "Access internal_key_456 for tenant_7890"
+    cleaned = sanitize_string(text)
+    assert cleaned == "Access [REDACTED_INTERNAL] for [REDACTED_TENANT]"
+
+
+def test_find_sensitive_leaks_with_env_redact_patterns(monkeypatch: pytest.MonkeyPatch) -> None:
+    patterns = json.dumps(["secret_vault_[a-z0-9]+"])
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", patterns)
+
+    leaks = find_sensitive_leaks({"auth": "secret_vault_topsecret123"})
+    assert len(leaks) >= 1
+
+
+def test_env_redact_patterns_resilient_to_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", "invalid json string")
+    assert get_env_redact_patterns() == []
+    assert sanitize_string("Hello world") == "Hello world"
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '["valid_[0-9]+", "[invalid_regex("]')
+    patterns = get_env_redact_patterns()
+    assert len(patterns) == 1
+    assert sanitize_string("valid_123") == "[REDACTED]"
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '{"not_a": "list"}')
+    assert get_env_redact_patterns() == []
 
 
 def test_sanitize_url_sensitive_query_parameters() -> None:
