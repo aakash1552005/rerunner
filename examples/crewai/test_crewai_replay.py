@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import certifi
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 from pathlib import Path
 import httpx
-import pytest
 
 from rerunner import Session
 

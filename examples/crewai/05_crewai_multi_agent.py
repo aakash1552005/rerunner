@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import certifi
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 import tempfile
@@ -60,7 +61,11 @@ def run_crewai_demo() -> None:
                                 "finish_reason": "stop",
                             }
                         ],
-                        "usage": {"prompt_tokens": 120, "completion_tokens": 60, "total_tokens": 180},
+                        "usage": {
+                            "prompt_tokens": 120,
+                            "completion_tokens": 60,
+                            "total_tokens": 180,
+                        },
                     },
                 )
 
@@ -113,8 +118,12 @@ def run_crewai_demo() -> None:
         )
 
         # 2. REPLAY MODE
-        console.print("[bold cyan]=== Step 2: Deterministic Replay (Zero Network Calls) ===[/bold cyan]")
-        console.print("[dim]Replaying with air-gapped transport: zero outbound API calls allowed.[/dim]")
+        console.print(
+            "[bold cyan]=== Step 2: Deterministic Replay (Zero Network Calls) ===[/bold cyan]"
+        )
+        console.print(
+            "[dim]Replaying with air-gapped transport: zero outbound API calls allowed.[/dim]"
+        )
 
         with Session(cassette_path=cassette_path, mode="replay") as replay_session:
             replayer_client = replay_session.get_client()
@@ -143,7 +152,10 @@ def run_crewai_demo() -> None:
                             "role": "system",
                             "content": "You are an Executive Tech Writer. Summarize the research.",
                         },
-                        {"role": "user", "content": f"Summarize these findings:\n{replayed_findings}"},
+                        {
+                            "role": "user",
+                            "content": f"Summarize these findings:\n{replayed_findings}",
+                        },
                     ],
                 },
             )
@@ -151,7 +163,9 @@ def run_crewai_demo() -> None:
 
         assert replayed_findings == findings
         assert replayed_article == article
-        console.print("[bold green][✓] Multi-agent replay matched live outputs bit-for-bit with $0 cost![/bold green]")
+        console.print(
+            "[bold green][✓] Multi-agent replay matched live outputs bit-for-bit with $0 cost![/bold green]"
+        )
 
 
 if __name__ == "__main__":
