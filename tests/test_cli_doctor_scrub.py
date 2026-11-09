@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 from typer.testing import CliRunner
 
 from rerunner.cassette import Cassette
@@ -24,6 +27,105 @@ def test_cli_doctor() -> None:
     assert "rich" in result.output
     assert "pydantic" in result.output
     assert "RERUNNER_RECORD_MODE" in result.output
+
+
+@pytest.mark.parametrize("extension", [".jsonl", ".zst", ".gz"])
+def test_cli_doctor_audits_clean_cassette_formats(tmp_path: Path, extension: str) -> None:
+    path = tmp_path / f"clean{extension}"
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200, body='{"ok":true}'),
+        )
+    )
+    cassette.save()
+
+    result = runner.invoke(app, ["doctor", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "Cryptographic integrity verified successfully" in result.output
+    assert "Security scan passed" in result.output
+    assert "Cassette audit passed for 1 file(s)" in result.output
+
+
+def test_cli_doctor_rejects_secret_leaks_in_url_chunks_and_tools(tmp_path: Path) -> None:
+    path = tmp_path / "leaky.jsonl"
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="GET", url="https://example.org/?contact=alice@example.org"
+            ),
+            response=RecordedResponse(status_code=200, chunks=["bob@example.org"]),
+        )
+    )
+    cassette.append(
+        CassetteEntry(
+            step=2,
+            entry_type="tool",
+            side_effect_name="lookup",
+            side_effect_kwargs={"recipient": "charlie@example.org"},
+        )
+    )
+    cassette.save()
+
+    result = runner.invoke(app, ["doctor", str(path)])
+    assert result.exit_code == 1
+    assert "SECURITY WARNING" in result.output
+    assert "REDACTED_EMAIL" in result.output
+
+
+def test_cli_doctor_rejects_tampered_and_missing_files(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.jsonl"
+    tampered = tmp_path / "tampered.jsonl"
+    cassette = Cassette(valid)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200, body="before"),
+        )
+    )
+    cassette.save()
+    lines = valid.read_text().splitlines()
+    entry = json.loads(lines[1])
+    entry["response"]["body"] = "after"
+    tampered.write_text(lines[0] + "\n" + json.dumps(entry) + "\n")
+
+    result = runner.invoke(app, ["doctor", str(valid), str(tampered), str(tmp_path / "absent.zst")])
+    assert result.exit_code == 1
+    assert "Cryptographic integrity verified successfully" in result.output
+    assert "INTEGRITY FAILURE" in result.output
+    assert "Error loading cassette" in result.output
+    assert "Cassette audit failed for 2 file(s)" in result.output
+
+
+def test_cli_doctor_verifies_hmac_when_key_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "signed.jsonl"
+    monkeypatch.setenv("RERUNNER_HMAC_KEY", "signing-key-for-test")
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200),
+        )
+    )
+    cassette.save()
+
+    assert runner.invoke(app, ["doctor", str(path)]).exit_code == 0
+    monkeypatch.setenv("RERUNNER_HMAC_KEY", "wrong-signing-key")
+    result = runner.invoke(app, ["doctor", str(path)])
+    assert result.exit_code == 1
+    assert "INTEGRITY FAILURE" in result.output
 
 
 def test_cli_scrub_removes_secrets_and_rechains_integrity(tmp_path: Path) -> None:

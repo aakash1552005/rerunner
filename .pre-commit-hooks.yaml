@@ -1,0 +1,9 @@
+- id: rerunner-doctor
+  name: Rerunner cassette integrity and secret audit
+  description: Reject cassettes with broken hash chains or unredacted sensitive data.
+  entry: rerunner doctor
+  language: python
+  files: '\.(jsonl|zst|gz)$'
+  types: [file]
+  pass_filenames: true
+  require_serial: true

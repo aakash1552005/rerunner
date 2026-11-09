@@ -214,16 +214,22 @@ def verify(
         if entry.entry_type == "http" and entry.request and entry.response:
             http_steps += 1
             total_chars += len(entry.request.body) + len(entry.response.body)
+            all_leaks.extend(find_sensitive_leaks(entry.request.url))
             all_leaks.extend(find_sensitive_leaks(entry.request.headers))
             all_leaks.extend(find_sensitive_leaks(entry.request.body))
             all_leaks.extend(find_sensitive_leaks(entry.response.headers))
             all_leaks.extend(find_sensitive_leaks(entry.response.body))
-        elif entry.entry_type == "side_effect":
+            all_leaks.extend(find_sensitive_leaks(entry.response.chunks))
+        elif entry.entry_type in ("side_effect", "tool"):
             side_effect_steps += 1
             if entry.side_effect_args:
                 all_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
+            if entry.side_effect_kwargs:
+                all_leaks.extend(find_sensitive_leaks(entry.side_effect_kwargs))
             if entry.side_effect_result:
                 all_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
+            if entry.side_effect_exception:
+                all_leaks.extend(find_sensitive_leaks(entry.side_effect_exception))
 
     all_leaks = list(dict.fromkeys(all_leaks))
 
@@ -581,8 +587,27 @@ def export_eval(
 
 
 @app.command()
-def doctor() -> None:
-    """Run diagnostic checks on your environment, installed SDKs, and storage backends."""
+def doctor(
+    cassette_paths: list[Path] | None = typer.Argument(
+        None, help="Optional cassette files to audit for integrity and unredacted secrets."
+    ),
+) -> None:
+    """Diagnose the environment, or audit supplied cassettes for integrity and secrets."""
+    if cassette_paths:
+        failures = 0
+        for cassette_path in cassette_paths:
+            console.print(f"[bold cyan]Auditing cassette:[/] {cassette_path}")
+            try:
+                verify(cassette_path=cassette_path, strict_security=True)
+            except SystemExit as exc:
+                if exc.code != 0:
+                    failures += 1
+        if failures:
+            console.print(f"[bold red]Cassette audit failed for {failures} file(s).[/]")
+            raise typer.Exit(code=1)
+        console.print(f"[bold green]Cassette audit passed for {len(cassette_paths)} file(s).[/]")
+        return
+
     table = Table(title="🩺 Rerunner System Diagnostic", show_header=True, header_style="bold cyan")
     table.add_column("Category", style="bold", width=14)
     table.add_column("Component", style="cyan", width=22)
