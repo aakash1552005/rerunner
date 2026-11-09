@@ -445,6 +445,9 @@ rerunner cost tests/cassettes --ci-summary
 # Audit system dependencies, environment variables, and active transports
 rerunner doctor
 
+# Audit recorded cassettes for broken hash chains and unredacted secrets
+rerunner doctor session.jsonl session.jsonl.zst session.jsonl.gz
+
 # Scrub secrets and re-sign cryptographic SHA-256 hash chains across existing cassettes
 rerunner scrub session.jsonl
 
@@ -469,6 +472,25 @@ rerunner export-eval session.jsonl -o session.eval.jsonl --format openai
 # Visually play back agent execution steps in terminal with Rich styling
 rerunner play session.jsonl
 ```
+
+### Pre-commit cassette security audit
+
+Install [pre-commit](https://pre-commit.com/), then add the official hook to your project's
+`.pre-commit-config.yaml` (after this hook is merged into a release):
+
+```yaml
+repos:
+  - repo: https://github.com/aakash1552005/rerunner
+    rev: <release-tag-containing-rerunner-doctor-hook>
+    hooks:
+      - id: rerunner-doctor
+```
+
+Run `pre-commit install` to check staged `.jsonl`, `.zst`, and `.gz` cassettes before commits.
+The hook exits nonzero if any cassette cannot be loaded, fails its SHA-256 integrity chain,
+or contains patterns matching unredacted API keys or PII. Set `RERUNNER_HMAC_KEY` when
+verifying HMAC-signed cassettes; without that key, the check is SHA-256 integrity only and
+does not provide HMAC-based tamper resistance. The check reports issues but never edits cassettes.
 
 ---
 
