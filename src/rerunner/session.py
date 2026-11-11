@@ -82,6 +82,9 @@ class Session:
         semantic_threshold: float = 0.80,
         embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
+        # Keep the caller's string: Path() collapses "s3://b/k" to "s3:/b/k"
+        # (or "s3:\\b\\k" on Windows), which no storage backend recognises.
+        self.cassette_uri = str(cassette_path)
         self.cassette_path = Path(cassette_path)
         self.requested_mode = mode
         self.fork_step = fork_step
@@ -111,11 +114,11 @@ class Session:
         env_mode = os.getenv("RERUNNER_MODE")
         mode_str = env_mode.lower().strip() if env_mode else self.requested_mode.lower().strip()
 
-        backend = get_storage_backend(str(self.cassette_path))
+        backend = get_storage_backend(self.cassette_uri)
         exists_and_non_empty = False
-        if backend.exists(str(self.cassette_path)):
+        if backend.exists(self.cassette_uri):
             try:
-                raw = backend.read_bytes(str(self.cassette_path))
+                raw = backend.read_bytes(self.cassette_uri)
                 exists_and_non_empty = len(raw.strip()) > 0
             except Exception:
                 exists_and_non_empty = False
@@ -129,20 +132,24 @@ class Session:
 
         if resolved in ("replay", "fork") and not exists_and_non_empty:
             raise CassetteMissingError(
-                f"Cassette file does not exist or is empty in {resolved} mode: {self.cassette_path}"
+                f"Cassette file does not exist or is empty in {resolved} mode: {self.cassette_uri}"
             )
 
         return resolved
 
+    def _cassette_exists(self) -> bool:
+        """Check the cassette through its storage backend, so remote URIs work too."""
+        return get_storage_backend(self.cassette_uri).exists(self.cassette_uri)
+
     def _setup_session(self) -> None:
         self.effective_mode = self._resolve_mode()
 
-        if self.effective_mode in ("replay", "fork") and self.cassette_path.exists():
-            self.cassette = Cassette.load(self.cassette_path)
+        if self.effective_mode in ("replay", "fork") and self._cassette_exists():
+            self.cassette = Cassette.load(self.cassette_uri)
             if self.effective_mode == "fork" and self.fork_step is not None:
                 self.cassette.truncate_after_step(self.fork_step)
         else:
-            self.cassette = Cassette(self.cassette_path)
+            self.cassette = Cassette(self.cassette_uri)
 
         self.transport = CassetteTransport(
             cassette_path=self.cassette_path,
@@ -183,7 +190,7 @@ class Session:
             self._patch_token = None
 
         if self.effective_mode in ("record", "fork") and (
-            self.cassette.entries or not self.cassette_path.exists()
+            self.cassette.entries or not self._cassette_exists()
         ):
             self.cassette.save()
 
