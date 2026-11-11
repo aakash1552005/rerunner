@@ -24,6 +24,49 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Record new cassettes instead of replaying existing ones",
     )
+    group.addoption(
+        "--rerunner-mode",
+        action="store",
+        choices=["auto", "record", "replay", "fork"],
+        default=None,
+        help=(
+            "Force the Rerunner mode for this run (auto, record, replay, or fork). "
+            "Takes precedence over --rerunner-record and any @pytest.mark.rerunner(mode=...)."
+        ),
+    )
+
+
+_VALID_MODES = ("auto", "record", "replay", "fork")
+
+
+def _cli_mode(config: pytest.Config) -> SessionMode | None:
+    """Mode forced from the command line, if any.
+
+    --rerunner-mode wins over the legacy --rerunner-record flag.
+    """
+    raw = config.getoption("--rerunner-mode", None)
+    if raw in _VALID_MODES:
+        return cast(SessionMode, raw)
+    if config.getoption("--rerunner-record", False):
+        return "record"
+    return None
+
+
+def _resolve_mode(
+    config: pytest.Config, marker: pytest.Mark | None
+) -> SessionMode:
+    """Resolve the session mode: CLI flags, then the marker, then 'auto'.
+
+    The RERUNNER_MODE environment variable is still honoured by
+    Session itself when it resolves the effective mode.
+    """
+    cli = _cli_mode(config)
+    if cli is not None:
+        return cli
+    raw_mode = marker.kwargs.get("mode", "auto") if marker else "auto"
+    return cast(
+        SessionMode, raw_mode if raw_mode in _VALID_MODES else "auto"
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -52,12 +95,7 @@ def _rerunner_marker_autouse(
     elif "cassette_path" in marker.kwargs:
         cassette_path = str(marker.kwargs["cassette_path"])
 
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    raw_mode = marker.kwargs.get("mode", "record" if is_record_mode else "auto")
-    mode_val: SessionMode = cast(
-        SessionMode,
-        raw_mode if raw_mode in ("auto", "record", "replay", "fork") else "auto",
-    )
+    mode_val = _resolve_mode(request.config, marker)
     auto_patch = bool(marker.kwargs.get("auto_patch", True))
 
     with Session(cassette_path=cassette_path, mode=mode_val, auto_patch=auto_patch):
@@ -85,8 +123,12 @@ def rerunner_transport(
     elif marker and "cassette_path" in marker.kwargs:
         cassette_path = str(marker.kwargs["cassette_path"])
 
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    mode: Literal["record", "replay"] = "record" if is_record_mode else "replay"
+    resolved = _resolve_mode(request.config, marker)
+    # CassetteTransport has no "auto": it keeps the historical default of
+    # replaying unless a record mode was requested.
+    mode: Literal["record", "replay", "fork"] = (
+        resolved if resolved in ("record", "replay", "fork") else "replay"
+    )
 
     transport = CassetteTransport(cassette_path=cassette_path, mode=mode)
     yield transport
@@ -114,14 +156,7 @@ def rerunner_session(
     elif marker and "cassette_path" in marker.kwargs:
         cassette_path = str(marker.kwargs["cassette_path"])
 
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    raw_mode = (
-        marker.kwargs.get("mode", "record" if is_record_mode else "auto") if marker else "auto"
-    )
-    mode_val: SessionMode = cast(
-        SessionMode,
-        raw_mode if raw_mode in ("auto", "record", "replay", "fork") else "auto",
-    )
+    mode_val = _resolve_mode(request.config, marker)
     auto_patch = bool(marker.kwargs.get("auto_patch", True)) if marker else True
 
     with Session(cassette_path=cassette_path, mode=mode_val, auto_patch=auto_patch) as session:
