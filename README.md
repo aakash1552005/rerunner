@@ -309,6 +309,14 @@ from rerunner.integrations import wrap_cohere
 client_cohere = wrap_cohere(cohere.ClientV2(), "agent_run.jsonl", mode="replay")
 ```
 
+The unified `rerunner.wrap()` also auto-detects all four Cohere client types:
+
+```python
+from rerunner import wrap
+
+client_cohere = wrap(cohere.ClientV2(), "agent_run.jsonl", mode="replay")
+```
+
 ### 1-Line Framework Adapters
 
 #### 🤖 Model Context Protocol (MCP) Replay

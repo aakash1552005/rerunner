@@ -156,6 +156,31 @@ class GoogleGenAIAdapter:
 
 
 @register_adapter
+class CohereAdapter:
+    """Built-in adapter for Cohere v1/v2 clients and their async variants."""
+
+    adapter_name = "cohere"
+
+    @classmethod
+    def can_wrap(cls, client: Any) -> bool:
+        module_name = getattr(type(client), "__module__", "")
+        return module_name == "cohere" or module_name.startswith("cohere.")
+
+    @classmethod
+    def wrap(
+        cls,
+        client: Any,
+        cassette_path: Path | str,
+        mode: Literal["record", "replay", "fork"] = "replay",
+        fork_step: int | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        from rerunner.integrations.cohere import wrap_cohere
+
+        return wrap_cohere(client, cassette_path=cassette_path, mode=mode, fork_step=fork_step)
+
+
+@register_adapter
 class BedrockAdapter:
     """Built-in adapter for AWS Bedrock clients."""
 
@@ -353,7 +378,7 @@ def wrap(
 ) -> Any:
     """Attach Rerunner cassette transport to any supported client via unified auto-detection.
 
-    Inspects registered adapters (OpenAI, Anthropic, Google, Bedrock, LangChain,
+    Inspects registered adapters (OpenAI, Anthropic, Google, Cohere, Bedrock, LangChain,
     AutoGen, Semantic Kernel, HTTPX, and user-registered providers) and attaches
     deterministic record/replay transport in 1 line.
 

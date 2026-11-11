@@ -20,6 +20,7 @@ def test_registered_adapters_discovered():
     assert "openai" in adapter_names
     assert "anthropic" in adapter_names
     assert "google_genai" in adapter_names
+    assert "cohere" in adapter_names
     assert "bedrock" in adapter_names
     assert "langchain" in adapter_names
     assert "autogen" in adapter_names

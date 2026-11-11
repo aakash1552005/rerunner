@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ import httpx
 import pytest
 
 from rerunner.async_transport import AsyncCassetteTransport
+from rerunner import wrap
 from rerunner.integrations import wrap_cohere, wrap_cohere_client
 from rerunner.transport import CassetteTransport
 
@@ -88,6 +91,47 @@ def test_wrap_cohere_client_alias() -> None:
     assert wrap_cohere_client is wrap_cohere
 
 
+@pytest.mark.parametrize("name", ["Client", "ClientV2", "AsyncClient", "AsyncClientV2"])
+@pytest.mark.parametrize("use_sdk", [False, True], ids=["fake", "sdk"])
+async def test_unified_wrap_cohere_client(
+    name: str, use_sdk: bool, temp_cassette_path: Path
+) -> None:
+    client_type = type(name, (FakeCohereClient,), {"__module__": "cohere.client"})
+    is_async = name.startswith("Async")
+    inner = httpx.AsyncClient() if is_async else httpx.Client()
+    if use_sdk:
+        cohere = pytest.importorskip("cohere")
+        client = getattr(cohere, name)(api_key="test-key", httpx_client=inner)
+    else:
+        client = client_type(inner)
+    try:
+        assert wrap(client, temp_cassette_path, mode="fork", fork_step=2) is client
+        expected = AsyncCassetteTransport if is_async else CassetteTransport
+        assert isinstance(inner._transport, expected)
+        assert inner._transport.cassette_path == temp_cassette_path
+        assert inner._transport.mode == "fork"
+        assert inner._transport.fork_step == 2
+        assert not inner._mounts
+    finally:
+        if isinstance(inner, httpx.AsyncClient):
+            await inner.aclose()
+        else:
+            inner.close()
+
+
+def test_unified_wrap_does_not_accept_unrelated_client(temp_cassette_path: Path) -> None:
+    client_type = type("Client", (), {"__module__": "not_cohere.client"})
+    with pytest.raises(TypeError, match="Unable to auto-detect adapter"):
+        wrap(client_type(), temp_cassette_path)
+
+
+def test_import_does_not_load_cohere_sdk() -> None:
+    subprocess.run(
+        [sys.executable, "-c", "import sys; import rerunner; assert 'cohere' not in sys.modules"],
+        check=True,
+    )
+
+
 @pytest.mark.parametrize("client", [object(), httpx.Client(), FakeCohereClient(None)])  # type: ignore[arg-type]
 def test_wrap_cohere_rejects_other_clients(client: Any, temp_cassette_path: Path) -> None:
     with pytest.raises(TypeError, match="wrap_cohere expects a cohere"):
@@ -104,11 +148,14 @@ def test_wrap_cohere_is_exported_from_integrations() -> None:
 # ---- the real Cohere SDK -----------------------------------------------------
 
 
-def test_cohere_v2_chat_records_then_replays_offline(temp_cassette_path: Path) -> None:
+@pytest.mark.parametrize("wrapper", [wrap_cohere, wrap])
+def test_cohere_v2_chat_records_then_replays_offline(
+    temp_cassette_path: Path, wrapper: Any
+) -> None:
     cohere = pytest.importorskip("cohere")
     api = CohereAPI()
 
-    recorder = wrap_cohere(cohere.ClientV2(api_key="test-key"), temp_cassette_path, mode="record")
+    recorder = wrapper(cohere.ClientV2(api_key="test-key"), temp_cassette_path, mode="record")
     _inner(recorder)._transport.real_transport = api
     recorded = recorder.chat(
         model="command-a-03-2025",
@@ -123,7 +170,7 @@ def test_cohere_v2_chat_records_then_replays_offline(temp_cassette_path: Path) -
     assert temp_cassette_path.exists()
 
     # A fresh client in replay mode answers from the cassette with no live call.
-    replayer = wrap_cohere(cohere.ClientV2(api_key="test-key"), temp_cassette_path, mode="replay")
+    replayer = wrapper(cohere.ClientV2(api_key="test-key"), temp_cassette_path, mode="replay")
     _inner(replayer)._transport.real_transport = api
     replayed = replayer.chat(
         model="command-a-03-2025",
@@ -146,13 +193,14 @@ def test_cohere_v1_client_v2_namespace_is_covered(temp_cassette_path: Path) -> N
     assert len(api.calls) == 1
 
 
-async def test_cohere_async_v2_chat_records_then_replays(temp_cassette_path: Path) -> None:
+@pytest.mark.parametrize("wrapper", [wrap_cohere, wrap])
+async def test_cohere_async_v2_chat_records_then_replays(
+    temp_cassette_path: Path, wrapper: Any
+) -> None:
     cohere = pytest.importorskip("cohere")
     api = AsyncCohereAPI()
 
-    recorder = wrap_cohere(
-        cohere.AsyncClientV2(api_key="test-key"), temp_cassette_path, mode="record"
-    )
+    recorder = wrapper(cohere.AsyncClientV2(api_key="test-key"), temp_cassette_path, mode="record")
     _inner(recorder)._transport.real_transport = api
     recorded = await recorder.chat(
         model="command-a-03-2025", messages=[{"role": "user", "content": "Say hello"}]
@@ -160,9 +208,7 @@ async def test_cohere_async_v2_chat_records_then_replays(temp_cassette_path: Pat
     assert recorded.message.content[0].text == "Hello from Cohere"
     assert len(api.calls) == 1
 
-    replayer = wrap_cohere(
-        cohere.AsyncClientV2(api_key="test-key"), temp_cassette_path, mode="replay"
-    )
+    replayer = wrapper(cohere.AsyncClientV2(api_key="test-key"), temp_cassette_path, mode="replay")
     _inner(replayer)._transport.real_transport = api
     replayed = await replayer.chat(
         model="command-a-03-2025", messages=[{"role": "user", "content": "Say hello"}]
