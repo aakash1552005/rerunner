@@ -155,13 +155,16 @@ def inspect(
         return
 
     table = Table(title="Recorded Execution Steps", show_header=True, header_style="bold magenta")
-    table.add_column("Step", style="dim", width=6)
-    table.add_column("Type", width=8)
-    table.add_column("Method / URL / Function", justify="left")
-    table.add_column("Status", width=8)
-    table.add_column("Stream", width=8)
-    table.add_column("Tokens", justify="right", width=10)
-    table.add_column("Latency", justify="right", width=10)
+    # The target column folds onto more lines instead of ending in "…", and the
+    # short columns are sized by their content, so a full URL or function name
+    # stays readable on an 80-column terminal.
+    table.add_column("Step", style="dim", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Method / URL / Function", justify="left", overflow="fold", ratio=1)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Stream", no_wrap=True)
+    table.add_column("Tokens", justify="right", no_wrap=True)
+    table.add_column("Latency", justify="right", no_wrap=True)
 
     for entry in cassette.entries:
         info = _extract_entry_info(entry)

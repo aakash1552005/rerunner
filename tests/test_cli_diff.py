@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 from typer.testing import CliRunner
 
 from rerunner import Cassette
@@ -107,3 +109,35 @@ def test_cli_diff_with_drift_and_fail_on_drift(tmp_path: Path) -> None:
     result_fail = runner.invoke(app, ["diff", str(cassette_a), str(cassette_b), "--fail-on-drift"])
     assert result_fail.exit_code == 1
     assert "Structural drift detected" in result_fail.output
+
+
+def test_cli_inspect_keeps_long_url_at_80_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rerunner import cli
+
+    url = "https://api.openai.com/v1/chat/completions?model=gpt-4o-mini&stream=true"
+    cassette_file = tmp_path / "long_url.zst"
+    cassette = Cassette(cassette_file)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="POST", url=url, request_key="key1"),
+            response=RecordedResponse(status_code=200, body='{"usage": {"total_tokens": 150}}'),
+        )
+    )
+    cassette.save()
+
+    monkeypatch.setattr(cli.console, "width", 80)
+    result = runner.invoke(app, ["inspect", str(cassette_file)])
+    assert result.exit_code == 0
+    assert "…" not in result.output
+
+    # Join the folded "Method / URL / Function" cells back into one string.
+    cells = [
+        line.split("│")[3].strip()
+        for line in result.output.splitlines()
+        if line.startswith("│") and line.count("│") == 8
+    ]
+    assert url in "".join(cells)
