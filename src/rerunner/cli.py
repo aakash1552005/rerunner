@@ -131,20 +131,52 @@ def inspect(
     cassette_path: Path = typer.Argument(
         ..., help="Path to a cassette file (.zst, .gz, .jsonl, .json)"
     ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        help="Show at most this many steps (applied after --entry-type).",
+    ),
+    entry_type: str | None = typer.Option(
+        None,
+        "--entry-type",
+        help="Only show steps of this type: http, side_effect, or tool.",
+    ),
 ) -> None:
     """Inspect and summarize the contents of a recorded cassette."""
+    if entry_type is not None and entry_type not in ("http", "side_effect", "tool"):
+        raise typer.BadParameter(
+            f"invalid entry type: {entry_type!r} (expected http, side_effect, or tool)",
+            param_hint="--entry-type",
+        )
+    if limit is not None and limit <= 0:
+        raise typer.BadParameter("limit must be a positive integer", param_hint="--limit")
+
     try:
         cassette = Cassette.load(cassette_path, verify_integrity=False)
     except Exception as exc:
         console.print(f"[bold red]Failed to load cassette:[/] {exc}")
         raise typer.Exit(code=1) from exc
 
+    total = len(cassette.entries)
+    shown_entries = cassette.entries
+    if entry_type is not None:
+        shown_entries = [e for e in shown_entries if e.entry_type == entry_type]
+    if limit is not None:
+        shown_entries = shown_entries[:limit]
+    filters_active = entry_type is not None or limit is not None
+
+    summary = (
+        f"[bold cyan]File:[/] {cassette_path}\n"
+        f"[bold cyan]Format Version:[/] {cassette.metadata.format_version}\n"
+        f"[bold cyan]Hash Algorithm:[/] {cassette.metadata.hash_algorithm}\n"
+        f"[bold cyan]Total Steps:[/] {total}"
+    )
+    if filters_active:
+        summary += f"\n[bold cyan]Showing:[/] {len(shown_entries)} of {total} steps"
+
     console.print(
         Panel(
-            f"[bold cyan]File:[/] {cassette_path}\n"
-            f"[bold cyan]Format Version:[/] {cassette.metadata.format_version}\n"
-            f"[bold cyan]Hash Algorithm:[/] {cassette.metadata.hash_algorithm}\n"
-            f"[bold cyan]Total Steps:[/] {len(cassette.entries)}",
+            summary,
             title="[bold green]Rerunner Cassette Summary[/]",
             border_style="green",
         )
@@ -152,6 +184,10 @@ def inspect(
 
     if not cassette.entries:
         console.print("[yellow]Cassette contains no recorded steps.[/]")
+        return
+
+    if not shown_entries:
+        console.print("[yellow]No steps match the active filters.[/]")
         return
 
     table = Table(title="Recorded Execution Steps", show_header=True, header_style="bold magenta")
@@ -163,7 +199,7 @@ def inspect(
     table.add_column("Tokens", justify="right", width=10)
     table.add_column("Latency", justify="right", width=10)
 
-    for entry in cassette.entries:
+    for entry in shown_entries:
         info = _extract_entry_info(entry)
         tokens_str = f"{info['tokens']:,}" if info["tokens"] is not None else "-"
         table.add_row(
