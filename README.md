@@ -300,6 +300,15 @@ client_claude = wrap_anthropic(anthropic.Anthropic(), "agent_run.jsonl", mode="r
 client_openai = wrap_openai(openai.OpenAI(), "agent_run.jsonl", mode="replay")
 ```
 
+Cohere (`pip install "rerunner[cohere]"`) works the same way, for `cohere.Client`, `cohere.ClientV2` and their async variants:
+
+```python
+import cohere
+from rerunner.integrations import wrap_cohere
+
+client_cohere = wrap_cohere(cohere.ClientV2(), "agent_run.jsonl", mode="replay")
+```
+
 ### 1-Line Framework Adapters
 
 #### 🤖 Model Context Protocol (MCP) Replay
