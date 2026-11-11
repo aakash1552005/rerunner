@@ -820,6 +820,12 @@ def cost(
         "--export-html",
         help="Destination path to export standalone HTML token & cost savings report.",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output the savings totals as JSON to stdout (for CI pipelines and bots).",
+    ),
 ) -> None:
     """Calculate token savings, latency saved, and estimated API dollar cost avoided via replay."""
     cassette_files: list[Path] = []
@@ -883,7 +889,25 @@ def cost(
             latency_sec=latency_sec,
             target_label=str(target_path),
         )
-        console.print(f"[bold green]✔ Standalone HTML savings report exported to:[/] {export_html}")
+        if not json_output:
+            console.print(
+                f"[bold green]✔ Standalone HTML savings report exported to:[/] {export_html}"
+            )
+
+    if json_output:
+        data = {
+            "cassette_count": len(cassette_files),
+            "total_steps": total_steps,
+            "total_http": total_http,
+            "total_tools": total_tools,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": round(estimated_cost_usd, 6),
+            "latency_sec": round(latency_sec, 3),
+        }
+        typer.echo(json.dumps(data, indent=2))
+        return
 
     if markdown or ci_summary:
         md = [

@@ -451,6 +451,9 @@ transport = CassetteTransport(
 # Calculate CI cost reductions, token savings, and generate GitHub step summaries
 rerunner cost tests/cassettes --ci-summary
 
+# Machine-readable savings totals for CI pipelines and bots
+rerunner cost tests/cassettes --json
+
 # Audit system dependencies, environment variables, and active transports
 rerunner doctor
 

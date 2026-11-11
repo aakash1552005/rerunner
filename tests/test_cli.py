@@ -203,3 +203,58 @@ def test_cli_cost_export_html(tmp_path: Path) -> None:
     assert "120" in content
     assert "80" in content
     assert "Detailed Replay vs Live API Comparison" in content
+
+
+def test_cli_cost_json_output(tmp_path: Path) -> None:
+    import json
+
+    from rerunner.cassette import Cassette
+    from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+    for name, tokens in (("a.jsonl", (120, 80)), ("b.jsonl", (30, 20))):
+        cass = Cassette(tmp_path / name)
+        cass.append(
+            CassetteEntry(
+                step=1,
+                entry_type="http",
+                request=RecordedRequest(
+                    method="POST", url="https://api.openai.com/v1/chat/completions", headers={}
+                ),
+                response=RecordedResponse(
+                    status_code=200,
+                    headers={},
+                    body=json.dumps(
+                        {
+                            "usage": {
+                                "prompt_tokens": tokens[0],
+                                "completion_tokens": tokens[1],
+                                "total_tokens": sum(tokens),
+                            }
+                        }
+                    ),
+                ),
+            )
+        )
+        cass.append(CassetteEntry(step=2, entry_type="tool"))
+        cass.save()
+
+    html_out = tmp_path / "savings.html"
+    result = runner.invoke(app, ["cost", str(tmp_path), "--json", "--export-html", str(html_out)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data == {
+        "cassette_count": 2,
+        "total_steps": 4,
+        "total_http": 2,
+        "total_tools": 2,
+        "prompt_tokens": 150,
+        "completion_tokens": 100,
+        "total_tokens": 250,
+        "estimated_cost_usd": 0.00125,
+        "latency_sec": 3.1,
+    }
+    assert html_out.exists()
+
+    result_short = runner.invoke(app, ["cost", str(tmp_path / "a.jsonl"), "-j"])
+    assert result_short.exit_code == 0
+    assert json.loads(result_short.output)["total_tokens"] == 200
