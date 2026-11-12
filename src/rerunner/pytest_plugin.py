@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 
+import re
 from collections.abc import Generator
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
@@ -41,18 +43,32 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+def default_cassette_path_for_node(node: pytest.Item) -> str:
+    """Derive a deterministic per-test cassette path under ``tests/cassettes/`` from ``node.nodeid``."""
+    raw_nodeid = str(getattr(node, "nodeid", "test"))
+    parts = raw_nodeid.split("::", 1)
+    module_part = Path(parts[0]).with_suffix("").as_posix()
+    module_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", module_part).strip("_") or "tests"
+    test_part = parts[1] if len(parts) > 1 else getattr(node, "name", "test")
+    test_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", test_part).strip("_") or "test"
+    return (Path("tests/cassettes") / module_slug / f"{test_slug}.jsonl").as_posix()
+
+
 def _resolve_pytest_cassette_and_mode(
     request: pytest.FixtureRequest,
 ) -> tuple[str, SessionMode, bool]:
     """Extract cassette path, effective session mode, and auto_patch flag for a test node."""
     marker = request.node.get_closest_marker("rerunner")
-    cassette_path = "cassette.jsonl"
+    cassette_path: str | None = None
     if marker and marker.args:
         cassette_path = str(marker.args[0])
     elif marker and "cassette" in marker.kwargs:
         cassette_path = str(marker.kwargs["cassette"])
     elif marker and "cassette_path" in marker.kwargs:
         cassette_path = str(marker.kwargs["cassette_path"])
+
+    if not cassette_path:
+        cassette_path = default_cassette_path_for_node(request.node)
 
     cli_mode = request.config.getoption("--rerunner-mode", None)
     is_record_mode = bool(request.config.getoption("--rerunner-record", False))

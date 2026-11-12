@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from collections import Counter
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from rerunner.sanitizer import SENSITIVE_QUERY_PARAMS
@@ -58,8 +59,49 @@ def normalize_headers(headers: dict[str, str]) -> dict[str, str]:
     return normalized
 
 
-def normalize_body(body: bytes | str | None) -> str:
-    """Normalize body by canonicalizing JSON if applicable, or trimming whitespace."""
+DEFAULT_VOLATILE_JSON_FIELDS: frozenset[str] = frozenset(
+    {
+        "timestamp",
+        "created_at",
+        "request_id",
+        "trace_id",
+        "nonce",
+        "idempotency_key",
+        "seed",
+    }
+)
+
+
+def get_env_ignore_fields() -> set[str]:
+    """Read comma-separated volatile JSON field names from ``RERUNNER_IGNORE_FIELDS``."""
+    raw = os.getenv("RERUNNER_IGNORE_FIELDS", "")
+    if not raw.strip():
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def _strip_json_fields(data: Any, fields: set[str], prefix: str = "") -> Any:
+    """Recursively omit volatile JSON keys (supports top-level names and dot-paths)."""
+    if not fields:
+        return data
+    if isinstance(data, dict):
+        cleaned: dict[str, Any] = {}
+        for k, v in data.items():
+            full_key = f"{prefix}.{k}" if prefix else str(k)
+            if str(k) in fields or full_key in fields:
+                continue
+            cleaned[k] = _strip_json_fields(v, fields, prefix=full_key)
+        return cleaned
+    if isinstance(data, list):
+        return [_strip_json_fields(item, fields, prefix=prefix) for item in data]
+    return data
+
+
+def normalize_body(
+    body: bytes | str | None,
+    ignore_fields: Iterable[str] | None = None,
+) -> str:
+    """Normalize body by canonicalizing JSON if applicable, optionally ignoring volatile fields."""
     if body is None:
         return ""
     if isinstance(body, bytes):
@@ -74,8 +116,14 @@ def normalize_body(body: bytes | str | None) -> str:
     if not body_str:
         return ""
 
+    effective_ignore = get_env_ignore_fields()
+    if ignore_fields is not None:
+        effective_ignore.update(str(f).strip() for f in ignore_fields if str(f).strip())
+
     try:
         parsed = json.loads(body_str)
+        if effective_ignore:
+            parsed = _strip_json_fields(parsed, effective_ignore)
         # Canonical JSON: sorted keys, compact separators
         return json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     except Exception:
@@ -104,9 +152,15 @@ def normalize_body_content(body: bytes | str | None) -> str:
         return canonical
 
 
-def normalize_body_fuzzy(body: bytes | str | None) -> str:
-    """Normalize body by stripping minor whitespace and dynamic timestamps."""
-    canonical = normalize_body(body)
+def normalize_body_fuzzy(
+    body: bytes | str | None,
+    ignore_fields: Iterable[str] | None = None,
+) -> str:
+    """Normalize body by stripping minor whitespace, volatile JSON fields, and dynamic timestamps."""
+    combined_ignore = set(DEFAULT_VOLATILE_JSON_FIELDS)
+    if ignore_fields is not None:
+        combined_ignore.update(str(f).strip() for f in ignore_fields if str(f).strip())
+    canonical = normalize_body(body, ignore_fields=combined_ignore)
     if not canonical:
         return ""
     # Strip ISO timestamp patterns
@@ -258,15 +312,16 @@ def compute_request_key(
     url: str,
     body: bytes | str | None = None,
     strategy: MatchingStrategy = "strict",
+    ignore_fields: Iterable[str] | None = None,
 ) -> str:
     """Compute deterministic SHA-256 hash identifying an HTTP request under a given matching strategy."""
     norm_url = normalize_url(url)
     if strategy == "content":
         norm_body = normalize_body_content(body)
     elif strategy == "fuzzy":
-        norm_body = normalize_body_fuzzy(body)
+        norm_body = normalize_body_fuzzy(body, ignore_fields=ignore_fields)
     else:
-        norm_body = normalize_body(body)
+        norm_body = normalize_body(body, ignore_fields=ignore_fields)
 
     payload = f"{method.upper()}|{norm_url}|{norm_body}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -280,16 +335,25 @@ def request_matches(
     strategy: MatchingStrategy = "strict",
     semantic_threshold: float = 0.80,
     embedding_fn: Callable[[str], list[float]] | None = None,
+    ignore_fields: Iterable[str] | None = None,
 ) -> bool:
     """Determine whether an incoming request matches a recorded request under the given strategy."""
     incoming_key = compute_request_key(
-        incoming_method, incoming_url, incoming_body, strategy=strategy
+        incoming_method,
+        incoming_url,
+        incoming_body,
+        strategy=strategy,
+        ignore_fields=ignore_fields,
     )
     if recorded.request_key == incoming_key:
         return True
-    if strategy in ("content", "fuzzy"):
+    if strategy in ("content", "fuzzy") or ignore_fields is not None:
         recorded_key = compute_request_key(
-            recorded.method, recorded.url, recorded.body, strategy=strategy
+            recorded.method,
+            recorded.url,
+            recorded.body,
+            strategy=strategy,
+            ignore_fields=ignore_fields,
         )
         return recorded_key == incoming_key
     if strategy == "semantic":
