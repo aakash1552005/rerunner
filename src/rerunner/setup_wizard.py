@@ -1,14 +1,15 @@
-"""One-command MCP setup wizard for Claude Code, Cursor, and Codex."""
+"""One-command MCP setup wizard for Claude Code, Cursor, Codex, Windsurf, and Cline."""
 
 from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_CLIENTS = ("claude-project", "claude", "cursor", "codex")
+SUPPORTED_CLIENTS = ("claude-project", "claude", "cursor", "codex", "windsurf", "cline")
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,22 @@ def _resolve_client_path(
         return project_dir / ".cursor" / "mcp.json"
     if client == "codex":
         return project_dir / ".codex" / "config.toml"
+    if client == "windsurf":
+        return home_dir / ".codeium" / "windsurf" / "mcp_config.json"
+    if client == "cline":
+        if sys.platform == "win32":
+            vs_code_user = home_dir / "AppData" / "Roaming" / "Code" / "User"
+        elif sys.platform == "darwin":
+            vs_code_user = home_dir / "Library" / "Application Support" / "Code" / "User"
+        else:
+            vs_code_user = home_dir / ".config" / "Code" / "User"
+        return (
+            vs_code_user
+            / "globalStorage"
+            / "saoudrizwan.claude-dev"
+            / "settings"
+            / "cline_mcp_settings.json"
+        )
     raise ValueError(
         f"Unsupported client '{client}'. Supported clients: {', '.join(SUPPORTED_CLIENTS)}"
     )

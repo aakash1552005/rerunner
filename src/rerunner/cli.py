@@ -1053,7 +1053,7 @@ def setup(
         "claude-project",
         "--clients",
         "-c",
-        help="Comma-separated agent clients (claude-project,claude,cursor,codex,all).",
+        help="Comma-separated agent clients (claude-project,claude,cursor,codex,windsurf,cline,all).",
     ),
     project_dir: Path | None = typer.Option(
         None,
@@ -1083,7 +1083,7 @@ def setup(
         help="Do not create .bak files before modifying existing configs.",
     ),
 ) -> None:
-    """Configure coding-agent MCP integration (Claude Code, Cursor, Codex)."""
+    """Configure coding-agent MCP integration (Claude Code, Cursor, Codex, Windsurf, Cline)."""
     try:
         planned = configure_clients(
             clients,
