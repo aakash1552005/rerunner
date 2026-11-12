@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import contextlib
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -357,14 +358,92 @@ class AzureBlobStorageBackend(BaseStorageBackend):
             ) from exc
 
 
-def get_storage_backend(uri: str) -> BaseStorageBackend:
+class CachedRemoteBackend(BaseStorageBackend):
+    """Local disk-cached wrapper around a remote BaseStorageBackend (Issue #83).
+
+    Avoids re-downloading large compressed cassettes across parallel CI workers
+    by caching payloads under ``~/.cache/rerunner/cassettes`` (or ``RERUNNER_CACHE_DIR``).
+    """
+
+    def __init__(
+        self,
+        remote: BaseStorageBackend,
+        cache_dir: Path | None = None,
+    ) -> None:
+        self.remote = remote
+        env_dir = os.getenv("RERUNNER_CACHE_DIR")
+        self.cache_dir = (
+            cache_dir
+            if cache_dir is not None
+            else (Path(env_dir) if env_dir else Path.home() / ".cache" / "rerunner" / "cassettes")
+        )
+
+    def _cache_path(self, uri: str) -> Path:
+        digest = hashlib.sha256(uri.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{digest}.bin"
+
+    def invalidate(self, uri: str) -> None:
+        """Remove a cached URI entry from disk if present."""
+        cache_file = self._cache_path(uri)
+        with contextlib.suppress(OSError):
+            if cache_file.exists():
+                cache_file.unlink()
+
+    def read_bytes(self, uri: str) -> bytes:
+        cache_file = self._cache_path(uri)
+        if cache_file.exists():
+            return cache_file.read_bytes()
+        data = self.remote.read_bytes(uri)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.cache_dir / f".{cache_file.stem}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(cache_file)
+        finally:
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+        return data
+
+    def write_bytes(self, uri: str, data: bytes) -> None:
+        self.remote.write_bytes(uri, data)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = self._cache_path(uri)
+        tmp = self.cache_dir / f".{cache_file.stem}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(cache_file)
+        finally:
+            if tmp.exists():
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+
+    def exists(self, uri: str) -> bool:
+        if self._cache_path(uri).exists():
+            return True
+        return self.remote.exists(uri)
+
+    def delete(self, uri: str) -> None:
+        self.invalidate(uri)
+        self.remote.delete(uri)
+
+
+def get_storage_backend(uri: str, *, use_cache: bool | None = None) -> BaseStorageBackend:
     """Resolve the appropriate storage backend based on URI scheme."""
+    cache_enabled = (
+        use_cache
+        if use_cache is not None
+        else os.getenv("RERUNNER_REMOTE_CACHE", "").strip().lower() in {"1", "true", "yes"}
+    )
     if uri.startswith("s3://"):
-        return S3StorageBackend()
+        backend: BaseStorageBackend = S3StorageBackend()
+        return CachedRemoteBackend(backend) if cache_enabled else backend
     if uri.startswith("gs://"):
-        return GCSStorageBackend()
+        backend = GCSStorageBackend()
+        return CachedRemoteBackend(backend) if cache_enabled else backend
     if uri.startswith("az://") or uri.startswith("azure://"):
-        return AzureBlobStorageBackend()
+        backend = AzureBlobStorageBackend()
+        return CachedRemoteBackend(backend) if cache_enabled else backend
     return LocalStorageBackend()
 
 
