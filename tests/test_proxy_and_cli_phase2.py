@@ -179,6 +179,59 @@ def test_proxy_server_record_mode_scrubs_and_persists(tmp_path: Path) -> None:
     assert req.headers["authorization"] == "[REDACTED]"
 
 
+def test_proxy_server_cors_headers_when_enabled(tmp_path: Path) -> None:
+    cassette_path = _create_proxy_cassette(tmp_path / "cors.jsonl")
+    server = RerunnerProxyServer(
+        cassette_path, port=0, mode="replay", cors_origin="*"
+    ).start_in_thread()
+    try:
+        preflight = httpx.options(
+            f"{server.base_url}/v1/chat/completions",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+            timeout=5.0,
+        )
+        assert preflight.status_code == 204
+        assert preflight.headers["access-control-allow-origin"] == "*"
+        assert "POST" in preflight.headers["access-control-allow-methods"]
+        assert preflight.headers["access-control-allow-headers"] == "*"
+
+        resp = httpx.post(
+            f"{server.base_url}/v1/chat/completions",
+            headers={"Origin": "http://localhost:3000"},
+            json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+            timeout=5.0,
+        )
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "*"
+
+        health = httpx.get(f"{server.base_url}/__rerunner/health", timeout=5.0)
+        assert health.headers["access-control-allow-origin"] == "*"
+    finally:
+        server.shutdown()
+
+
+def test_proxy_server_cors_disabled_by_default(tmp_path: Path) -> None:
+    cassette_path = _create_proxy_cassette(tmp_path / "no_cors.jsonl")
+    server = RerunnerProxyServer(cassette_path, port=0, mode="replay").start_in_thread()
+    try:
+        preflight = httpx.options(
+            f"{server.base_url}/v1/chat/completions",
+            headers={"Origin": "http://localhost:3000"},
+            timeout=5.0,
+        )
+        assert "access-control-allow-origin" not in preflight.headers
+
+        resp = httpx.get(f"{server.base_url}/__rerunner/health", timeout=5.0)
+        assert resp.status_code == 200
+        assert "access-control-allow-origin" not in resp.headers
+    finally:
+        server.shutdown()
+
+
 def test_cli_cost_json_and_inspect_filters_and_html_trace(tmp_path: Path) -> None:
     cassette_path = _create_proxy_cassette(tmp_path / "trace.jsonl")
 

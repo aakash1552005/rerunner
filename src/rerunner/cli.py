@@ -1003,6 +1003,11 @@ def serve(
         "--simulate-latency",
         help="Replay recorded SSE chunk delays in real time.",
     ),
+    cors_origin: str | None = typer.Option(
+        None,
+        "--cors-origin",
+        help="Access-Control-Allow-Origin value for browser agents (e.g. '*' or 'http://localhost:3000'). Disabled by default.",
+    ),
 ) -> None:
     """Start a cross-language HTTP/SSE replay proxy for TypeScript, Go, Rust, or browser agents."""
     if strategy not in ("strict", "content", "fuzzy", "semantic"):
@@ -1018,6 +1023,7 @@ def serve(
             upstream_url=upstream,
             matching_strategy=strategy,  # type: ignore[arg-type]
             simulate_latency=simulate_latency,
+            cors_origin=cors_origin,
         )
     except Exception as exc:
         console.print(f"[bold red]Failed to start proxy server:[/] {exc}")
