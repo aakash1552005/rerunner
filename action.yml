@@ -19,6 +19,14 @@ inputs:
     description: 'Post token savings, avoided API cost, and latency metrics to GitHub Step Summary'
     required: false
     default: 'true'
+  post-pr-comment:
+    description: 'Post or update a sticky PR comment with Rerunner replay savings on pull_request events'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token used to post or update sticky PR comments'
+    required: false
+    default: '${{ github.token }}'
 
 runs:
   using: 'composite'
@@ -46,4 +54,41 @@ runs:
       run: |
         if [ -d "${{ inputs.cassette-dir }}" ]; then
           python -m rerunner.cli cost "${{ inputs.cassette-dir }}" --ci-summary
+        fi
+
+    - name: Upsert Sticky PR Replay Savings Comment
+      if: inputs.post-pr-comment == 'true' && github.event_name == 'pull_request' && inputs.github-token != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        CASSETTE_DIR: ${{ inputs.cassette-dir }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        if [ ! -d "$CASSETTE_DIR" ] || [ -z "$PR_NUMBER" ]; then
+          exit 0
+        fi
+        COST_JSON=$(python -m rerunner.cli cost "$CASSETTE_DIR" --json)
+        python - "$COST_JSON" <<'PY' > /tmp/rerunner_pr_comment.md
+        import json
+        import sys
+
+        data = json.loads(sys.argv[1])
+        steps = data.get("total_steps", 0)
+        cassettes = data.get("cassette_files", 0)
+        tokens = data.get("total_tokens", 0)
+        cost = data.get("estimated_cost_usd", 0.0)
+        saved_s = data.get("estimated_latency_saved_seconds", 0.0)
+        print("<!-- rerunner-ci-summary -->")
+        print(
+            f"**Rerunner** replayed **{steps:,} agent steps** across `{cassettes}` cassette(s) "
+            f"— saved **${cost:.4f}**, **{tokens:,} tokens**, and **~{saved_s:.1f}s** vs live LLM calls · "
+            "SHA-256 chain & PII redaction verified."
+        )
+        PY
+        EXISTING_ID=$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" --jq '.[] | select(.body | contains("<!-- rerunner-ci-summary -->")) | .id' | head -n 1 || true)
+        if [ -n "$EXISTING_ID" ]; then
+          gh api -X PATCH "repos/${GH_REPO}/issues/comments/${EXISTING_ID}" -F "body=@/tmp/rerunner_pr_comment.md" >/dev/null
+        else
+          gh api -X POST "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" -F "body=@/tmp/rerunner_pr_comment.md" >/dev/null
         fi

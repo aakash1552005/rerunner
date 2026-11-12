@@ -21,7 +21,8 @@ from rerunner.cassette_ops import (
     verify_cassette_report,
 )
 from rerunner.mcp_server import serve_stdio
-from rerunner.reports import export_cost_html_report
+from rerunner.proxy_server import RerunnerProxyServer
+from rerunner.reports import export_cost_html_report, export_trace_html_report
 from rerunner.setup_wizard import configure_clients
 
 _extract_detailed_tokens_from_body = extract_detailed_tokens_from_body
@@ -68,6 +69,30 @@ def inspect(
     cassette_path: Path = typer.Argument(
         ..., help="Path to a cassette file (.zst, .gz, .jsonl, .json)"
     ),
+    limit: int | None = typer.Option(
+        None,
+        "--limit",
+        "-n",
+        min=1,
+        help="Maximum number of steps to display.",
+    ),
+    offset: int = typer.Option(
+        0,
+        "--offset",
+        min=0,
+        help="Zero-based offset into the filtered step list.",
+    ),
+    entry_type: str | None = typer.Option(
+        None,
+        "--entry-type",
+        "-t",
+        help="Filter steps by type (http, tool, side_effect).",
+    ),
+    export_html: Path | None = typer.Option(
+        None,
+        "--export-html",
+        help="Export a standalone interactive HTML flight trace viewer.",
+    ),
 ) -> None:
     """Inspect and summarize the contents of a recorded cassette."""
     try:
@@ -75,6 +100,26 @@ def inspect(
     except Exception as exc:
         console.print(f"[bold red]Failed to load cassette:[/] {exc}")
         raise typer.Exit(code=1) from exc
+
+    if export_html is not None:
+        out_path = export_trace_html_report(cassette_path, export_html)
+        console.print(f"[bold green]✔ Interactive flight trace exported to:[/] {out_path}")
+
+    entries = cassette.entries
+    if entry_type:
+        norm = entry_type.strip().lower()
+        if norm in ("tool", "side_effect"):
+            entries = [e for e in entries if e.entry_type in ("tool", "side_effect")]
+        elif norm == "http":
+            entries = [e for e in entries if e.entry_type == "http"]
+        else:
+            console.print(
+                f"[bold red]Invalid --entry-type '{entry_type}'. Use http, tool, or side_effect.[/]"
+            )
+            raise typer.Exit(code=1)
+
+    total_filtered = len(entries)
+    sliced = entries[offset : offset + limit] if limit is not None else entries[offset:]
 
     console.print(
         Panel(
@@ -87,8 +132,8 @@ def inspect(
         )
     )
 
-    if not cassette.entries:
-        console.print("[yellow]Cassette contains no recorded steps.[/]")
+    if not sliced:
+        console.print("[yellow]Cassette contains no matching recorded steps.[/]")
         return
 
     table = Table(
@@ -111,7 +156,7 @@ def inspect(
     table.add_column("Tokens", justify="right", width=6, no_wrap=True)
     table.add_column("Latency", justify="right", width=7, no_wrap=True)
 
-    for entry in cassette.entries:
+    for entry in sliced:
         info = _extract_entry_info(entry)
         tokens_str = f"{info['tokens']:,}" if info["tokens"] is not None else "-"
         table.add_row(
@@ -125,6 +170,11 @@ def inspect(
         )
 
     console.print(table)
+    if limit is not None and offset + len(sliced) < total_filtered:
+        console.print(
+            f"[dim]Showing {len(sliced)} of {total_filtered} matching steps "
+            f"(offset={offset}). Use --offset {offset + limit} to see more.[/]"
+        )
 
 
 @app.command()
@@ -614,6 +664,12 @@ def cost(
         "--export-html",
         help="Destination path to export standalone HTML token & cost savings report.",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output machine-readable JSON savings report to stdout.",
+    ),
 ) -> None:
     """Calculate token savings, latency saved, and estimated API dollar cost avoided via replay."""
     cassette_files: list[Path] = []
@@ -662,6 +718,22 @@ def cost(
     # Blended estimate: $5.00 per 1M tokens average across modern frontier models
     estimated_cost_usd = (total_tokens / 1_000_000.0) * 5.0
     latency_sec = total_latency_ms / 1000.0
+
+    if json_output:
+        payload = {
+            "target": str(target_path),
+            "cassette_files": len(cassette_files),
+            "total_steps": total_steps,
+            "total_http": total_http,
+            "total_tools": total_tools,
+            "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "estimated_cost_usd": round(estimated_cost_usd, 4),
+            "estimated_latency_saved_seconds": round(latency_sec, 2),
+        }
+        typer.echo(json.dumps(payload, indent=2))
+        return
 
     if export_html:
         export_cost_html_report(
@@ -838,6 +910,72 @@ def tui(
     selected_idx = min(max(step if step is not None else 0, 0), len(cassette.entries) - 1)
     layout = _render_flight_deck(cassette, cassette_path, selected_idx)
     console.print(layout)
+
+
+@app.command()
+def serve(
+    cassette_path: Path = typer.Argument(..., help="Path to the cassette file (.jsonl, .zst, .gz)"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address for the proxy server."),
+    port: int = typer.Option(8080, "--port", "-p", min=0, max=65535, help="Port to listen on."),
+    mode: str = typer.Option(
+        "replay",
+        "--mode",
+        "-m",
+        help="Proxy operating mode: replay, record, or auto.",
+    ),
+    upstream: str | None = typer.Option(
+        None,
+        "--upstream",
+        "-u",
+        help="Upstream API base URL (e.g. https://api.openai.com) used when recording.",
+    ),
+    strategy: str = typer.Option(
+        "strict",
+        "--strategy",
+        "-s",
+        help="Request matching strategy: strict, content, fuzzy, or semantic.",
+    ),
+    simulate_latency: bool = typer.Option(
+        False,
+        "--simulate-latency",
+        help="Replay recorded SSE chunk delays in real time.",
+    ),
+) -> None:
+    """Start a cross-language HTTP/SSE replay proxy for TypeScript, Go, Rust, or browser agents."""
+    if strategy not in ("strict", "content", "fuzzy", "semantic"):
+        console.print(f"[bold red]Invalid matching strategy:[/] {strategy}")
+        raise typer.Exit(code=1)
+
+    try:
+        server = RerunnerProxyServer(
+            cassette_path,
+            host=host,
+            port=port,
+            mode=mode,
+            upstream_url=upstream,
+            matching_strategy=strategy,  # type: ignore[arg-type]
+            simulate_latency=simulate_latency,
+        )
+    except Exception as exc:
+        console.print(f"[bold red]Failed to start proxy server:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        Panel(
+            f"[bold cyan]Proxy URL:[/] {server.base_url}\n"
+            f"[bold cyan]Mode:[/] {server.config.effective_mode} ({len(server.config.cassette.entries)} steps)\n"
+            f"[bold cyan]Strategy:[/] {strategy}\n"
+            f"[dim]Point Node/Go/Rust/Python SDKs via OPENAI_BASE_URL={server.base_url}/v1 "
+            f"or ANTHROPIC_BASE_URL={server.base_url}[/]",
+            title="⚡ Rerunner Universal Replay Proxy",
+            border_style="cyan",
+        )
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down Rerunner proxy...[/]")
+        server.shutdown()
 
 
 @app.command()
