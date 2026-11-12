@@ -42,7 +42,7 @@ def test_cli_inspect_command(tmp_path: Path) -> None:
     result = runner.invoke(app, ["inspect", str(cassette_file)])
     assert result.exit_code == 0
     assert "POST" in result.output
-    assert "api.openai.com" in result.output
+    assert "/v1/chat" in result.output
     assert "query_database(...)" in result.output
     assert "150" in result.output
     assert "27.5ms" in result.output

@@ -11,9 +11,22 @@ import hashlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from rerunner.cassette import Cassette
+
+
+def _detect_genai_system(url: str) -> str | None:
+    """Identify the GenAI provider from a parsed URL hostname."""
+    host = (urlparse(url).hostname or "").lower()
+    if host == "api.anthropic.com" or host.endswith(".api.anthropic.com"):
+        return "anthropic"
+    if host == "api.openai.com" or host.endswith(".api.openai.com"):
+        return "openai"
+    if host == "googleapis.com" or host.endswith(".googleapis.com"):
+        return "google_genai"
+    return None
 
 
 def _generate_deterministic_id(seed: str, length: int) -> str:
@@ -104,15 +117,10 @@ def export_to_otlp(
                 ]
             )
             # Detect model provider
-            if "api.anthropic.com" in entry.request.url:
+            genai_system = _detect_genai_system(entry.request.url)
+            if genai_system is not None:
                 span_attributes.append(
-                    {"key": "gen_ai.system", "value": {"stringValue": "anthropic"}}
-                )
-            elif "api.openai.com" in entry.request.url:
-                span_attributes.append({"key": "gen_ai.system", "value": {"stringValue": "openai"}})
-            elif "googleapis.com" in entry.request.url:
-                span_attributes.append(
-                    {"key": "gen_ai.system", "value": {"stringValue": "google_genai"}}
+                    {"key": "gen_ai.system", "value": {"stringValue": genai_system}}
                 )
         elif entry.entry_type == "side_effect":
             tool_name = entry.side_effect_name or "unknown_tool"
