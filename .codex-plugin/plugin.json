@@ -1,0 +1,40 @@
+{
+  "name": "rerunner",
+  "version": "0.3.1",
+  "description": "Deterministic flight recorder, replay engine, and CI test runner for AI agents.",
+  "author": {
+    "name": "AAKASH S S",
+    "url": "https://github.com/aakash1552005"
+  },
+  "homepage": "https://github.com/aakash1552005/rerunner",
+  "repository": "https://github.com/aakash1552005/rerunner",
+  "license": "Apache-2.0",
+  "keywords": [
+    "ai-agents",
+    "cassette",
+    "deterministic-replay",
+    "pytest",
+    "mcp-server"
+  ],
+  "skills": "./skills",
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "Rerunner",
+    "shortDescription": "Deterministic flight recorder and replay engine for AI agents",
+    "longDescription": "Inspect recorded LLM and tool cassettes, verify SHA-256 chains and PII redaction, fork trajectories from any step, and scaffold deterministic pytest tests.",
+    "developerName": "AAKASH S S",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/aakash1552005/rerunner",
+    "defaultPrompt": [
+      "Use Rerunner to inspect this failed agent cassette and find where it diverged.",
+      "Use Rerunner to verify SHA-256 integrity and scan this cassette for leaked secrets before committing.",
+      "Use Rerunner to fork this cassette from step 3 and generate a deterministic pytest regression test."
+    ]
+  }
+}
+

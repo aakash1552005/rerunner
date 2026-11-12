@@ -184,10 +184,10 @@ name = "Clean inward dependency layers"
 type = "layers"
 layers = [
     "rerunner.cli | rerunner.pytest_plugin",
-    "rerunner.integrations | rerunner.eval_exporter | rerunner.otel | rerunner.reports",
+    "rerunner.mcp_server | rerunner.setup_wizard | rerunner.integrations | rerunner.eval_exporter | rerunner.otel | rerunner.reports",
     "rerunner.session",
     "rerunner.transport | rerunner.async_transport | rerunner.patcher",
-    "rerunner.side_effects",
+    "rerunner.side_effects | rerunner.cassette_ops",
     "rerunner.cassette",
     "rerunner.matcher | rerunner.storage",
     "rerunner.integrity",
@@ -205,6 +205,7 @@ source_modules = [
     "rerunner.storage",
     "rerunner.cassette",
     "rerunner.side_effects",
+    "rerunner.cassette_ops",
 ]
 forbidden_modules = [
     "httpx",

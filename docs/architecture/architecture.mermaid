@@ -1,11 +1,13 @@
 graph TD
     subgraph "Entry Points (Layer 4)"
-        CLI["src/rerunner/cli.py<br/>inspect · verify · diff · stats · play<br/>export-otel · export-eval · doctor · scrub · cost · tui"]
+        CLI["src/rerunner/cli.py<br/>inspect · verify · diff · stats · play · mcp · setup<br/>export-otel · export-eval · doctor · scrub · cost · tui"]
         PYTEST["src/rerunner/pytest_plugin.py<br/>@pytest.mark.rerunner · --rerunner-mode<br/>rerunner_transport · rerunner_session"]
     end
 
-    subgraph "Adapters & Exporters (Layer 3)"
+    subgraph "Adapters, MCP & Exporters (Layer 3)"
         INTEGRATIONS["src/rerunner/integrations/<br/>wrap() registry + SDK adapters:<br/>OpenAI · Anthropic · Google · Cohere · Bedrock<br/>LangChain · LangGraph · LlamaIndex · AutoGen · SK · MCP"]
+        MCP_SERVER["src/rerunner/mcp_server.py<br/>Stdio JSON-RPC 2.0 MCP Server (8 tools)"]
+        SETUP_WIZARD["src/rerunner/setup_wizard.py<br/>Claude Code · Cursor · Codex MCP configurer"]
         OTEL["src/rerunner/otel.py<br/>OTLP trace & metrics export"]
         EVAL["src/rerunner/eval_exporter.py<br/>OpenAI / ShareGPT / HuggingFace JSONL"]
         REPORTS["src/rerunner/reports.py<br/>Self-contained HTML savings reports"]

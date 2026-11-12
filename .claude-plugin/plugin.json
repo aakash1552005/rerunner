@@ -1,0 +1,29 @@
+{
+  "name": "rerunner",
+  "version": "0.3.1",
+  "description": "Deterministic flight recorder, replay engine, and CI test runner for AI agents.",
+  "author": {
+    "name": "AAKASH S S",
+    "url": "https://github.com/aakash1552005"
+  },
+  "homepage": "https://github.com/aakash1552005/rerunner",
+  "repository": "https://github.com/aakash1552005/rerunner",
+  "license": "Apache-2.0",
+  "keywords": [
+    "ai-agents",
+    "cassette",
+    "deterministic-replay",
+    "pytest",
+    "mcp-server"
+  ],
+  "skills": "./skills",
+  "mcpServers": {
+    "rerunner": {
+      "command": "rerunner",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+

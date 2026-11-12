@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "rerunner": {
+      "command": "rerunner",
+      "args": [
+        "mcp"
+      ],
+      "cwd": ".",
+      "startup_timeout_sec": 30
+    }
+  }
+}
+
