@@ -682,15 +682,30 @@ def _entry_dedup_key(entry: CassetteEntry) -> str:
     )
 
 
+def verify_sources(input_paths: Sequence[Path | str]) -> None:
+    """Verify SHA-256/HMAC integrity of every input shard, raising on the first failure."""
+    for src in input_paths:
+        try:
+            Cassette.load(src, verify_integrity=True)
+        except Exception as exc:
+            raise ValueError(
+                f"Integrity verification failed for input shard '{src}': {exc}"
+            ) from exc
+
+
 def merge_cassettes(
     input_paths: Sequence[Path | str],
     output_path: Path | str,
     *,
     deduplicate: bool = False,
+    verify_all: bool = False,
 ) -> dict[str, Any]:
     """Merge multiple cassettes into one re-numbered, SHA-256 re-signed cassette."""
     if not input_paths:
         raise ValueError("At least one input cassette path is required.")
+
+    if verify_all:
+        verify_sources(input_paths)
 
     merged = Cassette(output_path)
     seen_keys: set[str] = set()
