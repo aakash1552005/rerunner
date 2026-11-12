@@ -8,6 +8,13 @@ from typing import Any, Protocol
 
 import httpx
 
+from rerunner.patchers import (
+    install_aiohttp_patch,
+    install_requests_patch,
+    uninstall_aiohttp_patch,
+    uninstall_requests_patch,
+)
+
 
 class ActiveSessionProtocol(Protocol):
     """Minimal protocol implemented by Session for zero-touch HTTPX patching."""
@@ -65,17 +72,19 @@ def _patched_async_client_init(self: httpx.AsyncClient, *args: Any, **kwargs: An
 
 
 def install_auto_patch() -> None:
-    """Install the global HTTPX interception hooks with reference counting."""
+    """Install the global HTTPX, requests, and aiohttp interception hooks with reference counting."""
     global _PATCH_REF_COUNT
     with _PATCH_LOCK:
         if _PATCH_REF_COUNT == 0:
             httpx.Client.__init__ = _patched_client_init  # type: ignore[method-assign]
             httpx.AsyncClient.__init__ = _patched_async_client_init  # type: ignore[method-assign]
+            install_requests_patch(get_active_session)
+            install_aiohttp_patch(get_active_session)
         _PATCH_REF_COUNT += 1
 
 
 def uninstall_auto_patch() -> None:
-    """Restore original HTTPX Client initializers when reference count drops to 0."""
+    """Restore original HTTPX, requests, and aiohttp hooks when reference count drops to 0."""
     global _PATCH_REF_COUNT
     with _PATCH_LOCK:
         if _PATCH_REF_COUNT > 0:
@@ -83,6 +92,8 @@ def uninstall_auto_patch() -> None:
             if _PATCH_REF_COUNT == 0:
                 httpx.Client.__init__ = _ORIGINAL_SYNC_INIT  # type: ignore[method-assign]
                 httpx.AsyncClient.__init__ = _ORIGINAL_ASYNC_INIT  # type: ignore[method-assign]
+                uninstall_requests_patch()
+                uninstall_aiohttp_patch()
 
 
 def set_active_session(

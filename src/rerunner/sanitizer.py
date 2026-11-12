@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import dataclasses
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -677,6 +679,84 @@ class SetherRedactor:
             cursor = end
         pieces.append(text[cursor:])
         return "".join(pieces)
+
+
+class Pseudonymizer:
+    """Format-preserving deterministic pseudonymizer for PII (Issue #80).
+
+    Replaces emails, UUIDs, SSNs, and credit cards with deterministic synthetic
+    values derived from an HMAC-SHA256 seed so strict schema validators
+    (e.g., Pydantic EmailStr, UUID) continue to pass on replay without leaking PII.
+    """
+
+    _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+    _UUID_RE = re.compile(
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+    )
+    _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+    _CC_RE = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
+
+    def __init__(self, seed: str | bytes | None = None) -> None:
+        raw_seed = seed or os.getenv("RERUNNER_PSEUDONYM_SEED") or "rerunner-default-seed"
+        self._key = raw_seed.encode("utf-8") if isinstance(raw_seed, str) else raw_seed
+
+    def _digest(self, namespace: str, value: str) -> str:
+        return hmac.new(self._key, f"{namespace}:{value}".encode(), hashlib.sha256).hexdigest()
+
+    def pseudonymize_email(self, email: str) -> str:
+        """Return a deterministic synthetic email address preserving RFC/EmailStr validity."""
+        digest = self._digest("email", email.lower())
+        return f"user_{digest[:10]}@example.test"
+
+    def pseudonymize_uuid(self, value: str) -> str:
+        """Return a deterministic valid UUIDv4-formatted identifier."""
+        h = self._digest("uuid", value.lower())
+        return f"{h[:8]}-{h[8:12]}-4{h[13:16]}-8{h[17:20]}-{h[20:32]}"
+
+    def pseudonymize_ssn(self, value: str) -> str:
+        """Return a deterministic synthetic non-issued 900-series SSN."""
+        num = int(self._digest("ssn", value)[:8], 16)
+        mid = (num // 10000) % 90 + 10
+        tail = num % 9000 + 1000
+        return f"900-{mid:02d}-{tail:04d}"
+
+    def pseudonymize_credit_card(self, value: str) -> str:
+        """Return a deterministic Luhn-valid synthetic 16-digit Visa-prefix card number."""
+        digits_only = re.sub(r"\D", "", value)
+        if len(digits_only) < 13 or not _is_luhn_valid(digits_only):
+            return value
+        num = int(self._digest("cc", digits_only)[:12], 16) % 10**9
+        body = f"400000{num:09d}"
+        total = 0
+        for idx, ch in enumerate(reversed(body)):
+            d = int(ch)
+            if idx % 2 == 0:
+                d *= 2
+                if d > 9:
+                    d -= 9
+            total += d
+        check = (10 - (total % 10)) % 10
+        return f"{body}{check}"
+
+    def pseudonymize_string(self, text: str) -> str:
+        """Apply format-preserving pseudonymization across known PII patterns in text."""
+        if not text:
+            return text
+        result = self._EMAIL_RE.sub(lambda m: self.pseudonymize_email(m.group(0)), text)
+        result = self._UUID_RE.sub(lambda m: self.pseudonymize_uuid(m.group(0)), result)
+        result = self._SSN_RE.sub(lambda m: self.pseudonymize_ssn(m.group(0)), result)
+        result = self._CC_RE.sub(lambda m: self.pseudonymize_credit_card(m.group(0)), result)
+        return result
+
+    def pseudonymize_payload(self, payload: Any) -> Any:
+        """Recursively pseudonymize strings inside JSON-like structures."""
+        if isinstance(payload, str):
+            return self.pseudonymize_string(payload)
+        if isinstance(payload, list):
+            return [self.pseudonymize_payload(item) for item in payload]
+        if isinstance(payload, dict):
+            return {k: self.pseudonymize_payload(v) for k, v in payload.items()}
+        return payload
 
 
 # Alias for backward compatibility with tutorial and generic payload sanitization

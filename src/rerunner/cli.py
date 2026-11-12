@@ -23,6 +23,12 @@ from rerunner.cassette_ops import (
     scrub_cassette_file,
     verify_cassette_report,
 )
+from rerunner.integrity import (
+    compute_merkle_root,
+    generate_ed25519_keypair,
+    sign_merkle_root_ed25519,
+    verify_merkle_root_ed25519,
+)
 from rerunner.mcp_server import serve_stdio
 from rerunner.proxy_server import RerunnerProxyServer
 from rerunner.reports import export_cost_html_report, export_trace_html_report
@@ -1131,6 +1137,79 @@ def setup(
 
     console.print(table)
     console.print("[bold green]✔ Rerunner MCP configuration complete![/]")
+
+
+@app.command()
+def keygen(
+    output_dir: Path = typer.Option(
+        Path("."),
+        "--output-dir",
+        "-o",
+        help="Directory where rerunner_ed25519.key and rerunner_ed25519.pub will be written.",
+    ),
+) -> None:
+    """Generate an Ed25519 keypair for asymmetric Merkle-root cassette signing."""
+    try:
+        private_pem, public_pem = generate_ed25519_keypair()
+    except ImportError as exc:
+        console.print(f"[bold red]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    priv_path = output_dir / "rerunner_ed25519.key"
+    pub_path = output_dir / "rerunner_ed25519.pub"
+    priv_path.write_bytes(private_pem)
+    pub_path.write_bytes(public_pem)
+    console.print(f"[bold green]✔ Generated Ed25519 keypair:[/] {priv_path}, {pub_path}")
+
+
+@app.command()
+def sign(
+    cassette_path: Path = typer.Argument(..., help="Path to the cassette file."),
+    private_key: Path | None = typer.Option(
+        None,
+        "--private-key",
+        "-k",
+        help="Path to Ed25519 private PEM key to sign the Merkle root.",
+    ),
+    public_key: Path | None = typer.Option(
+        None,
+        "--public-key",
+        "-p",
+        help="Path to Ed25519 public PEM key to verify an existing signature.",
+    ),
+    signature_file: Path | None = typer.Option(
+        None,
+        "--signature-file",
+        "-s",
+        help="Path to .sig file (defaults to <cassette_path>.sig).",
+    ),
+) -> None:
+    """Compute a cassette's SHA-256 Merkle root and sign or verify it with Ed25519."""
+    from rerunner.cassette import Cassette
+
+    cassette = Cassette.load(cassette_path, verify_integrity=True)
+    merkle_root = compute_merkle_root(cassette.entries)
+    sig_path = signature_file or Path(f"{cassette_path}.sig")
+
+    if private_key is not None:
+        signature_b64 = sign_merkle_root_ed25519(merkle_root, private_key.read_bytes())
+        sig_path.write_text(signature_b64, encoding="utf-8")
+        console.print(f"[bold green]✔ Signed Merkle root[/] `{merkle_root[:16]}...` -> {sig_path}")
+        return
+
+    if public_key is not None:
+        if not sig_path.exists():
+            console.print(f"[bold red]❌ Signature file not found:[/] {sig_path}")
+            raise typer.Exit(code=1)
+        sig_b64 = sig_path.read_text(encoding="utf-8").strip()
+        if not verify_merkle_root_ed25519(merkle_root, sig_b64, public_key.read_bytes()):
+            console.print("[bold red]❌ Invalid Ed25519 signature for Merkle root![/]")
+            raise typer.Exit(code=1)
+        console.print(f"[bold green]✔ Ed25519 signature verified[/] (root: {merkle_root[:16]}...)")
+        return
+
+    console.print(f"Merkle root: [cyan]{merkle_root}[/]")
 
 
 if __name__ == "__main__":
