@@ -1,0 +1,54 @@
+site_name: Rerunner
+site_description: Deterministic flight recorder, replay engine, and CI test runner for AI agents.
+site_url: https://aakash1552005.github.io/rerunner/
+repo_url: https://github.com/aakash1552005/rerunner
+repo_name: aakash1552005/rerunner
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - fenced_code
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Onboarding: ONBOARDING.md
+      - Tutorial: TUTORIAL.md
+  - AI Agents & MCP: mcp-and-agents.md
+  - Cross-Language & CI:
+      - Universal Proxy & PR Bot: proxy-and-ci.md
+      - GitHub Actions Caching: recipes/github_actions_caching.md
+  - Benchmarks: benchmarks.md
+  - Architecture: architecture.md
+

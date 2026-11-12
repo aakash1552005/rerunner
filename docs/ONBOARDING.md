@@ -106,7 +106,7 @@ Then visit [github.com/aakash1552005/rerunner](https://github.com/aakash1552005/
 
 - **Fast First Response:** We aim to review or acknowledge every newcomer PR within **24–48 hours**.
 - **Friendly, Constructive Reviews:** We will guide you through any CI failures or style adjustments.
-- **Permanent Recognition:** Once merged, your name and GitHub profile will be added to [`AUTHORS.md`](../AUTHORS.md) and celebrated in our release notes!
+- **Permanent Recognition:** Once merged, your name and GitHub profile will be added to [`AUTHORS.md`](https://github.com/aakash1552005/rerunner/blob/main/AUTHORS.md) and celebrated in our release notes!
 
 ---
 

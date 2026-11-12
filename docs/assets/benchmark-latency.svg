@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="210" viewBox="0 0 720 210" role="img" aria-label="Rerunner Deterministic Replay vs. Live LLM API">
+  <rect width="720" height="210" rx="14" fill="#0f172a"/>
+  <rect x="1" y="1" width="718" height="208" rx="13" fill="none" stroke="#334155"/>
+  <text x="24" y="34" fill="#f8fafc" font-size="18" font-weight="700" font-family="ui-sans-serif, system-ui, sans-serif">Rerunner Deterministic Replay vs. Live LLM API</text>
+  <text x="24" y="54" fill="#94a3b8" font-size="12" font-family="ui-sans-serif, system-ui, sans-serif">20 agent turns (150ms simulated network RTT/turn) · 661.2x faster · $0.00 token spend</text>
+  <text x="24" y="98" fill="#e2e8f0" font-size="13" font-weight="600" font-family="ui-sans-serif, system-ui, sans-serif">Live API Calls</text><rect x="210" y="84" width="360" height="20" rx="6" fill="#1e293b"/><rect x="210" y="84" width="360.0" height="20" rx="6" fill="#ef4444"/><text x="584" y="99" fill="#f8fafc" font-size="13" font-weight="600" font-family="ui-monospace, monospace">3.07s</text><text x="24" y="152" fill="#e2e8f0" font-size="13" font-weight="600" font-family="ui-sans-serif, system-ui, sans-serif">Rerunner Replay</text><rect x="210" y="138" width="360" height="20" rx="6" fill="#1e293b"/><rect x="210" y="138" width="8.0" height="20" rx="6" fill="#22c55e"/><text x="584" y="153" fill="#f8fafc" font-size="13" font-weight="600" font-family="ui-monospace, monospace">0.005s</text>
+</svg>
