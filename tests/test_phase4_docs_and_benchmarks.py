@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -12,8 +17,6 @@ def test_benchmark_report_generator_produces_valid_svg_and_markdown(tmp_path: Pa
     spec = importlib.util.spec_from_file_location("generate_report", script_path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    import sys
-
     sys.modules["generate_report"] = mod
     spec.loader.exec_module(mod)
 
@@ -37,6 +40,48 @@ def test_benchmark_report_generator_produces_valid_svg_and_markdown(tmp_path: Pa
     assert "<svg" in comp_svg and "</svg>" in comp_svg
     assert "assets/benchmark-latency.svg" in bench_md
     assert "assets/benchmark-compression.svg" in bench_md
+
+
+def test_benchmark_cli_exports_json_alongside_default_artifacts(tmp_path: Path) -> None:
+    script = tmp_path / "benchmarks" / "generate_report.py"
+    script.parent.mkdir()
+    shutil.copyfile(REPO_ROOT / "benchmarks" / script.name, script)
+    output = tmp_path / "bench.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--steps",
+            "3",
+            "--step-ms",
+            "5",
+            "--turns",
+            "10",
+            "--json",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output.read_text(encoding="utf-8"))
+    latency = report["latency"]
+    assert latency["steps"] == 3
+    assert latency["tokens_saved"] == 3090
+    assert latency["speedup"] == pytest.approx(
+        latency["live_total_s"] / max(latency["replay_total_s"], 1e-6)
+    )
+    compression = {row["filename"]: row for row in report["compression"]}
+    plain = compression["cassette.jsonl"]
+    gzip = compression["cassette.jsonl.gz"]
+    assert plain["ratio_pct"] == 0
+    assert gzip["ratio_pct"] == pytest.approx((1 - gzip["size_kb"] / plain["size_kb"]) * 100)
+    assert (tmp_path / "docs" / "benchmarks.md").is_file()
+    assert (tmp_path / "docs" / "assets" / "benchmark-latency.svg").is_file()
+    assert (tmp_path / "docs" / "assets" / "benchmark-compression.svg").is_file()
 
 
 def test_docs_and_localized_readmes_exist() -> None:
