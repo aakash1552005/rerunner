@@ -13,6 +13,7 @@ import httpx
 
 from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette, CassetteError
+from rerunner.config import config_mode
 from rerunner.matcher import MatchingStrategy
 from rerunner.patcher import ActiveSessionProtocol, reset_active_session, set_active_session
 from rerunner.sanitizer import PiiRedactor
@@ -107,9 +108,13 @@ class Session:
         return self.effective_mode
 
     def _resolve_mode(self) -> ResolvedMode:
-        """Resolve mode respecting RERUNNER_MODE environment variable and file existence."""
+        """Resolve mode respecting RERUNNER_MODE, explicit mode, pyproject.toml, and file existence."""
         env_mode = os.getenv("RERUNNER_MODE")
-        mode_str = env_mode.lower().strip() if env_mode else self.requested_mode.lower().strip()
+        if env_mode and env_mode.strip():
+            mode_str = env_mode.lower().strip()
+        else:
+            requested = self.requested_mode.lower().strip()
+            mode_str = config_mode() or requested if requested == "auto" else requested
 
         backend = get_storage_backend(self.cassette_uri)
         exists_and_non_empty = False

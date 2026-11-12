@@ -23,6 +23,7 @@ from rerunner.cassette_ops import (
     scrub_cassette_file,
     verify_cassette_report,
 )
+from rerunner.config import DEFAULT_CASSETTE_DIR, config_cassette_dir
 from rerunner.integrity import (
     compute_merkle_root,
     generate_ed25519_keypair,
@@ -574,7 +575,7 @@ def doctor(
     rec_mode = os.getenv("RERUNNER_RECORD_MODE", "once")
     table.add_row("Config", "RERUNNER_RECORD_MODE", "[bold green]✔ Set[/]", f"Mode: '{rec_mode}'")
 
-    cass_dir = os.getenv("RERUNNER_CASSETTE_DIR", ".rerunner/cassettes")
+    cass_dir = os.getenv("RERUNNER_CASSETTE_DIR") or config_cassette_dir() or DEFAULT_CASSETTE_DIR
     table.add_row("Config", "RERUNNER_CASSETTE_DIR", "[bold green]✔ Set[/]", f"Path: '{cass_dir}'")
 
     hmac_key = os.getenv("RERUNNER_HMAC_KEY")

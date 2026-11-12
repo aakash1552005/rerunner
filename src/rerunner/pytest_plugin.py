@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+import os
 import re
 from collections.abc import Generator
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 
+from rerunner.config import config_cassette_dir
 from rerunner.session import Session, SessionMode
 from rerunner.transport import CassetteTransport
 
@@ -51,7 +53,8 @@ def default_cassette_path_for_node(node: pytest.Item) -> str:
     module_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", module_part).strip("_") or "tests"
     test_part = parts[1] if len(parts) > 1 else getattr(node, "name", "test")
     test_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", test_part).strip("_") or "test"
-    return (Path("tests/cassettes") / module_slug / f"{test_slug}.jsonl").as_posix()
+    base_dir = os.getenv("RERUNNER_CASSETTE_DIR") or config_cassette_dir() or "tests/cassettes"
+    return (Path(base_dir) / module_slug / f"{test_slug}.jsonl").as_posix()
 
 
 def _resolve_pytest_cassette_and_mode(
