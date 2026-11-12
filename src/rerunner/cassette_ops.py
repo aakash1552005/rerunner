@@ -54,7 +54,7 @@ def extract_model_from_bodies(req_body: str, resp_body: str) -> str | None:
             continue
         try:
             data = json.loads(raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             continue
         if isinstance(data, dict):
             model = data.get("model") or data.get("modelVersion")
