@@ -12,10 +12,20 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/type%20checked-mypy%20strict-blue.svg)](https://mypy-lang.org/)
+[![Docs](https://img.shields.io/badge/docs-mkdocs--material-526CFE.svg)](https://aakash1552005.github.io/rerunner/)
+
+**English** · [中文](docs/readme/README_zh.md) · [日本語](docs/readme/README_ja.md) · [한국어](docs/readme/README_ko.md) · [Español](docs/readme/README_es.md) · [Deutsch](docs/readme/README_de.md)
 
 *Record your AI agent once. Replay forever in CI in 0ms with $0 API tokens.*
 
 </div>
+
+```bash
+# 1-Line Quickstart: install + wire Rerunner MCP into Claude Code, Cursor & Codex
+pip install rerunner && rerunner setup --clients claude,cursor,codex
+```
+
+![Rerunner Replay vs Live Latency](docs/assets/benchmark-latency.svg)
 
 ```text
   ┌────────────────────────────────────────────────────────────────────────┐
