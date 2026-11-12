@@ -14,9 +14,12 @@ from rich.table import Table
 from rerunner.cassette import Cassette
 from rerunner.cassette_ops import (
     diff_cassettes_report,
+    estimate_entry_cost_usd,
     extract_detailed_tokens_from_body,
     extract_entry_info,
+    extract_model_from_bodies,
     extract_tokens_from_body,
+    merge_cassettes,
     scrub_cassette_file,
     verify_cassette_report,
 )
@@ -691,6 +694,8 @@ def cost(
     prompt_tokens = 0
     completion_tokens = 0
     total_latency_ms = 0.0
+    estimated_cost_usd = 0.0
+    by_model: dict[str, dict[str, Any]] = {}
 
     for path in cassette_files:
         try:
@@ -700,10 +705,28 @@ def cost(
                 if entry.entry_type == "http" and entry.response:
                     total_http += 1
                     t_info = _extract_detailed_tokens_from_body(entry.response.body)
+                    req_body = entry.request.body if entry.request else ""
+                    model_name = extract_model_from_bodies(req_body, entry.response.body)
                     if t_info["total"]:
                         total_tokens += t_info["total"]
                         prompt_tokens += t_info["prompt"]
                         completion_tokens += t_info["completion"]
+                        step_cost = estimate_entry_cost_usd(
+                            t_info["prompt"],
+                            t_info["completion"],
+                            t_info["total"],
+                            model=model_name,
+                        )
+                        estimated_cost_usd += step_cost
+                        model_key = model_name or "unknown"
+                        bucket = by_model.setdefault(
+                            model_key, {"calls": 0, "tokens": 0, "estimated_cost_usd": 0.0}
+                        )
+                        bucket["calls"] += 1
+                        bucket["tokens"] += t_info["total"]
+                        bucket["estimated_cost_usd"] = round(
+                            float(bucket["estimated_cost_usd"]) + step_cost, 6
+                        )
                     total_latency_ms += (
                         sum(entry.response.chunk_delays_ms)
                         if entry.response.chunk_delays_ms
@@ -715,8 +738,6 @@ def cost(
         except Exception:  # nosec B112
             continue
 
-    # Blended estimate: $5.00 per 1M tokens average across modern frontier models
-    estimated_cost_usd = (total_tokens / 1_000_000.0) * 5.0
     latency_sec = total_latency_ms / 1000.0
 
     if json_output:
@@ -731,6 +752,7 @@ def cost(
             "completion_tokens": completion_tokens,
             "estimated_cost_usd": round(estimated_cost_usd, 4),
             "estimated_latency_saved_seconds": round(latency_sec, 2),
+            "by_model": by_model,
         }
         typer.echo(json.dumps(payload, indent=2))
         return
@@ -910,6 +932,41 @@ def tui(
     selected_idx = min(max(step if step is not None else 0, 0), len(cassette.entries) - 1)
     layout = _render_flight_deck(cassette, cassette_path, selected_idx)
     console.print(layout)
+
+
+@app.command()
+def merge(
+    inputs: list[Path] = typer.Argument(..., help="Input cassette files to merge in order."),
+    output_path: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Destination cassette path (.jsonl, .zst, .gz).",
+    ),
+    deduplicate: bool = typer.Option(
+        False,
+        "--deduplicate",
+        help="Remove duplicate HTTP/tool steps while preserving first occurrence order.",
+    ),
+) -> None:
+    """Merge multiple cassettes into one re-numbered, SHA-256 re-signed cassette."""
+    try:
+        result = merge_cassettes(inputs, output_path, deduplicate=deduplicate)
+    except Exception as exc:
+        console.print(f"[bold red]Merge failed:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        Panel(
+            f"[bold green]✔ Merged {result['input_cassettes']} cassettes successfully![/]\n"
+            f"[bold cyan]Output:[/] {result['output_path']}\n"
+            f"[bold cyan]Total Steps:[/] {result['merged_steps']}\n"
+            f"[bold cyan]Duplicates Removed:[/] {result['deduplicated_removed']}\n"
+            f"[dim]SHA-256 chain re-signed from GENESIS.[/]",
+            title="🧬 Cassette Merge",
+            border_style="green",
+        )
+    )
 
 
 @app.command()

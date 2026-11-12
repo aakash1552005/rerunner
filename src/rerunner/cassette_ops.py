@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from rerunner.cassette import Cassette
@@ -21,6 +22,72 @@ from rerunner.sanitizer import (
 CASSETTE_EXTENSIONS = (".jsonl", ".json", ".jsonl.zst", ".cassette.zst", ".zst", ".jsonl.gz", ".gz")
 DEFAULT_COST_PER_M_TOKENS_USD = 10.0
 DEFAULT_LIVE_CALL_LATENCY_SECONDS = 1.8
+
+# Blended (input_usd_per_1M, output_usd_per_1M) reference rates for common LLM models
+MODEL_PRICING_PER_1M_USD: dict[str, tuple[float, float]] = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1-nano": (0.10, 0.40),
+    "gpt-4.1": (2.00, 8.00),
+    "o3-mini": (1.10, 4.40),
+    "o1": (15.00, 60.00),
+    "claude-3-5-haiku": (0.80, 4.00),
+    "claude-3-5-sonnet": (3.00, 15.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-3-opus": (15.00, 75.00),
+    "gemini-2.5-flash": (0.15, 0.60),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "command-a": (2.50, 10.00),
+    "command-r-plus": (2.50, 10.00),
+    "command-r": (0.15, 0.60),
+}
+DEFAULT_INPUT_OUTPUT_PRICING_USD = (2.50, 10.00)
+
+
+def extract_model_from_bodies(req_body: str, resp_body: str) -> str | None:
+    """Extract model identifier from recorded HTTP response or request JSON payloads."""
+    for raw in (resp_body, req_body):
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            model = data.get("model") or data.get("modelVersion")
+            if isinstance(model, str) and model.strip():
+                return model.strip()
+    return None
+
+
+def resolve_model_pricing(model: str | None) -> tuple[float, float]:
+    """Return ``(input_usd_per_1M, output_usd_per_1M)`` for ``model`` with prefix matching."""
+    if not model:
+        return DEFAULT_INPUT_OUTPUT_PRICING_USD
+    norm = model.lower().strip()
+    for prefix in sorted(MODEL_PRICING_PER_1M_USD.keys(), key=len, reverse=True):
+        if norm == prefix or norm.startswith(f"{prefix}-") or norm.startswith(prefix):
+            return MODEL_PRICING_PER_1M_USD[prefix]
+    return DEFAULT_INPUT_OUTPUT_PRICING_USD
+
+
+def estimate_entry_cost_usd(
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    model: str | None = None,
+) -> float:
+    """Calculate estimated API USD cost for a single recorded step."""
+    in_rate, out_rate = resolve_model_pricing(model)
+    if prompt_tokens > 0 or completion_tokens > 0:
+        return (prompt_tokens / 1_000_000.0) * in_rate + (
+            completion_tokens / 1_000_000.0
+        ) * out_rate
+    blended_rate = (in_rate + out_rate) / 2.0
+    return (max(0, total_tokens) / 1_000_000.0) * blended_rate
 
 
 def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
@@ -602,4 +669,61 @@ def scaffold_pytest_regression_code(
         "mode": mode,
         "pytest_code": code,
         "run_command": f"pytest -k {clean_name}",
+    }
+
+
+def _entry_dedup_key(entry: CassetteEntry) -> str:
+    if entry.entry_type == "http" and entry.request:
+        return f"http:{entry.request.method}:{entry.request.url}:{entry.request.request_key}"
+    return (
+        f"tool:{entry.entry_type}:{entry.side_effect_name}:"
+        f"{json.dumps(entry.side_effect_args, sort_keys=True, default=str)}:"
+        f"{json.dumps(entry.side_effect_kwargs, sort_keys=True, default=str)}"
+    )
+
+
+def merge_cassettes(
+    input_paths: Sequence[Path | str],
+    output_path: Path | str,
+    *,
+    deduplicate: bool = False,
+) -> dict[str, Any]:
+    """Merge multiple cassettes into one re-numbered, SHA-256 re-signed cassette."""
+    if not input_paths:
+        raise ValueError("At least one input cassette path is required.")
+
+    merged = Cassette(output_path)
+    seen_keys: set[str] = set()
+    deduplicated_removed = 0
+    expected_prev = "GENESIS"
+    step_num = 0
+
+    for src in input_paths:
+        loaded = Cassette.load(src, verify_integrity=False)
+        for entry in loaded.entries:
+            if deduplicate:
+                key = _entry_dedup_key(entry)
+                if key in seen_keys:
+                    deduplicated_removed += 1
+                    continue
+                seen_keys.add(key)
+
+            step_num += 1
+            copied = entry.model_copy(deep=True)
+            copied.step = step_num
+            copied.prev_hash = expected_prev
+            copied.entry_hash = compute_entry_hash(copied, expected_prev)
+            expected_prev = copied.entry_hash
+            merged.entries.append(copied)
+
+    merged._last_hash = expected_prev
+    merged._step_counter = step_num
+    merged.save(output_path)
+
+    return {
+        "output_path": str(output_path),
+        "input_cassettes": len(input_paths),
+        "merged_steps": step_num,
+        "deduplicated_removed": deduplicated_removed,
+        "head_hash": expected_prev,
     }
