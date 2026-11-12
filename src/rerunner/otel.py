@@ -207,7 +207,7 @@ def export_cassette_to_otel_file(
     """Load a cassette and export its contents to an OpenTelemetry JSON file."""
     from rerunner.cassette import Cassette
 
-    cassette = Cassette.load(Path(cassette_path), verify_integrity=False)
+    cassette = Cassette.load(cassette_path, verify_integrity=False)
     payload = export_to_otlp(cassette, service_name=service_name)
     if include_metrics:
         payload["metrics"] = compute_cassette_metrics(cassette)

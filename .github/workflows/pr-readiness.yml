@@ -1,0 +1,56 @@
+name: PR readiness
+
+on:
+  pull_request_target:
+    branches: [main]
+    types:
+      [
+        opened,
+        edited,
+        synchronize,
+        reopened,
+        ready_for_review,
+        converted_to_draft,
+      ]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-readiness-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    name: Validate author readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check author ownership declaration
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr) return;
+
+            const author = (pr.user?.login || "").toLowerCase();
+            if (author === "dependabot[bot]" || author === "renovate[bot]" || author === "release-please[bot]") {
+              core.info(`Skipping author readiness check for automation bot ${author}.`);
+              return;
+            }
+
+            if (pr.draft) {
+              core.info("Draft PR: skipping readiness enforcement until marked ready for review.");
+              return;
+            }
+
+            const body = pr.body || "";
+            const checked = /^- \[[xX]\] I have reviewed the complete diff myself/m.test(body);
+            if (!checked) {
+              core.setFailed(
+                "Author readiness declaration required: check `- [x] I have reviewed the complete diff myself and verified every modified behavior and test claim.` in the PR body."
+              );
+              return;
+            }
+            core.info("Author readiness declaration verified.");

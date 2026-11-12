@@ -24,7 +24,7 @@ runs:
   using: 'composite'
   steps:
     - name: Cache Rerunner Cassettes
-      uses: actions/cache@v6
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ inputs.cassette-dir }}
         key: rerunner-cassettes-${{ runner.os }}-${{ hashFiles(format('{0}/**', inputs.cassette-dir)) }}

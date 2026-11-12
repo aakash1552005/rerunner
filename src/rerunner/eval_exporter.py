@@ -112,7 +112,7 @@ def export_cassette_to_eval_format(
     Returns:
         Summary dict containing counts and export metadata.
     """
-    cassette = Cassette.load(Path(cassette_path), verify_integrity=False)
+    cassette = Cassette.load(cassette_path, verify_integrity=False)
     output_records: list[dict[str, Any]] = []
 
     for entry in cassette.entries:

@@ -366,3 +366,25 @@ def get_storage_backend(uri: str) -> BaseStorageBackend:
     if uri.startswith("az://") or uri.startswith("azure://"):
         return AzureBlobStorageBackend()
     return LocalStorageBackend()
+
+
+REMOTE_URI_PREFIXES = ("s3://", "gs://", "az://", "azure://")
+
+
+def is_remote_uri(uri: Path | str) -> bool:
+    """Return True when the cassette reference points to a cloud object store URI."""
+    return str(uri).startswith(REMOTE_URI_PREFIXES)
+
+
+def resolve_cassette_ref(cassette_path: Path | str) -> tuple[Path | str, str]:
+    """Normalize a cassette reference without coercing remote URIs into Path objects."""
+    uri = str(cassette_path)
+    if is_remote_uri(uri):
+        return uri, uri
+    return Path(cassette_path), uri
+
+
+def cassette_exists(cassette_path: Path | str) -> bool:
+    """Check whether a local or remote cassette exists via its storage backend."""
+    uri = str(cassette_path)
+    return get_storage_backend(uri).exists(uri)

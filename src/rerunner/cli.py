@@ -154,14 +154,25 @@ def inspect(
         console.print("[yellow]Cassette contains no recorded steps.[/]")
         return
 
-    table = Table(title="Recorded Execution Steps", show_header=True, header_style="bold magenta")
-    table.add_column("Step", style="dim", width=6)
-    table.add_column("Type", width=8)
-    table.add_column("Method / URL / Function", justify="left")
-    table.add_column("Status", width=8)
-    table.add_column("Stream", width=8)
-    table.add_column("Tokens", justify="right", width=10)
-    table.add_column("Latency", justify="right", width=10)
+    table = Table(
+        title="Recorded Execution Steps",
+        show_header=True,
+        header_style="bold magenta",
+        expand=True,
+    )
+    table.add_column("Step", style="dim", width=4, no_wrap=True)
+    table.add_column("Type", width=5, no_wrap=True)
+    table.add_column(
+        "Method / URL / Function",
+        justify="left",
+        overflow="fold",
+        no_wrap=False,
+        min_width=20,
+    )
+    table.add_column("Status", width=6, no_wrap=True)
+    table.add_column("Stream", width=6, no_wrap=True)
+    table.add_column("Tokens", justify="right", width=6, no_wrap=True)
+    table.add_column("Latency", justify="right", width=7, no_wrap=True)
 
     for entry in cassette.entries:
         info = _extract_entry_info(entry)

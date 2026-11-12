@@ -1,0 +1,78 @@
+graph TD
+    subgraph "Entry Points (Layer 4)"
+        CLI["src/rerunner/cli.py<br/>inspect · verify · diff · stats · play<br/>export-otel · export-eval · doctor · scrub · cost · tui"]
+        PYTEST["src/rerunner/pytest_plugin.py<br/>@pytest.mark.rerunner · --rerunner-mode<br/>rerunner_transport · rerunner_session"]
+    end
+
+    subgraph "Adapters & Exporters (Layer 3)"
+        INTEGRATIONS["src/rerunner/integrations/<br/>wrap() registry + SDK adapters:<br/>OpenAI · Anthropic · Google · Cohere · Bedrock<br/>LangChain · LangGraph · LlamaIndex · AutoGen · SK · MCP"]
+        OTEL["src/rerunner/otel.py<br/>OTLP trace & metrics export"]
+        EVAL["src/rerunner/eval_exporter.py<br/>OpenAI / ShareGPT / HuggingFace JSONL"]
+        REPORTS["src/rerunner/reports.py<br/>Self-contained HTML savings reports"]
+    end
+
+    subgraph "Session & Transports (Layer 2)"
+        SESSION["src/rerunner/session.py<br/>Session · record() · replay() · fork()<br/>RERUNNER_MODE override + URI resolution"]
+        TRANSPORT["src/rerunner/transport.py<br/>CassetteTransport + lazy SSE byte stream"]
+        ASYNC_TRANSPORT["src/rerunner/async_transport.py<br/>AsyncCassetteTransport + async SSE stream"]
+        PATCHER["src/rerunner/patcher.py<br/>Ref-counted zero-touch httpx auto-patching<br/>(depends only on ActiveSessionProtocol)"]
+    end
+
+    subgraph "Core Engine (Layer 1)"
+        SIDE_EFFECTS["src/rerunner/side_effects.py<br/>@side_effect · @record_tool · contextvars"]
+        CASSETTE["src/rerunner/cassette.py<br/>Cassette · RLock · cursors · .zst/.gz/.jsonl"]
+        MATCHER["src/rerunner/matcher.py<br/>strict · content · fuzzy · semantic keys"]
+        STORAGE["src/rerunner/storage.py<br/>Local · AWS S3 · GCS · Azure Blob"]
+    end
+
+    subgraph "Domain & Safety Primitives (Layer 0)"
+        INTEGRITY["src/rerunner/integrity.py<br/>SHA-256 hash chain + HMAC-SHA256"]
+        SANITIZER["src/rerunner/sanitizer.py<br/>JSON-safe secret & PII redaction + Luhn + Sether"]
+        MODELS["src/rerunner/models.py<br/>Pydantic v2 RecordedRequest / Response / CassetteEntry"]
+    end
+
+    CLI --> INTEGRATIONS
+    CLI --> REPORTS
+    CLI --> CASSETTE
+    CLI --> INTEGRITY
+    CLI --> SANITIZER
+    PYTEST --> SESSION
+    PYTEST --> TRANSPORT
+    PYTEST --> PATCHER
+
+    INTEGRATIONS --> TRANSPORT
+    INTEGRATIONS --> ASYNC_TRANSPORT
+    INTEGRATIONS --> SIDE_EFFECTS
+    INTEGRATIONS --> CASSETTE
+    OTEL --> CASSETTE
+    EVAL --> CASSETTE
+
+    SESSION --> TRANSPORT
+    SESSION --> ASYNC_TRANSPORT
+    SESSION --> PATCHER
+    SESSION --> SIDE_EFFECTS
+    SESSION --> CASSETTE
+    SESSION --> STORAGE
+    SESSION --> MATCHER
+
+    TRANSPORT --> CASSETTE
+    TRANSPORT --> MATCHER
+    TRANSPORT --> STORAGE
+    TRANSPORT --> SANITIZER
+    TRANSPORT --> MODELS
+
+    ASYNC_TRANSPORT --> CASSETTE
+    ASYNC_TRANSPORT --> MATCHER
+    ASYNC_TRANSPORT --> STORAGE
+    ASYNC_TRANSPORT --> SANITIZER
+    ASYNC_TRANSPORT --> MODELS
+
+    SIDE_EFFECTS --> CASSETTE
+    SIDE_EFFECTS --> SANITIZER
+    SIDE_EFFECTS --> MODELS
+
+    CASSETTE --> INTEGRITY
+    CASSETTE --> MATCHER
+    CASSETTE --> STORAGE
+    CASSETTE --> MODELS
+    MATCHER --> SANITIZER

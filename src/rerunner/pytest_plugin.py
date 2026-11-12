@@ -24,6 +24,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Record new cassettes instead of replaying existing ones",
     )
+    group.addoption(
+        "--rerunner-mode",
+        action="store",
+        choices=("auto", "record", "replay", "fork"),
+        default=None,
+        help="Override Rerunner session mode for marked tests and fixtures (auto|record|replay|fork)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -32,6 +39,37 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rerunner(cassette, mode='auto', auto_patch=True): Record or replay HTTP calls via Rerunner",
     )
+
+
+def _resolve_pytest_cassette_and_mode(
+    request: pytest.FixtureRequest,
+) -> tuple[str, SessionMode, bool]:
+    """Extract cassette path, effective session mode, and auto_patch flag for a test node."""
+    marker = request.node.get_closest_marker("rerunner")
+    cassette_path = "cassette.jsonl"
+    if marker and marker.args:
+        cassette_path = str(marker.args[0])
+    elif marker and "cassette" in marker.kwargs:
+        cassette_path = str(marker.kwargs["cassette"])
+    elif marker and "cassette_path" in marker.kwargs:
+        cassette_path = str(marker.kwargs["cassette_path"])
+
+    cli_mode = request.config.getoption("--rerunner-mode", None)
+    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
+    marker_mode = marker.kwargs.get("mode") if marker else None
+
+    if cli_mode in ("auto", "record", "replay", "fork"):
+        raw_mode = cli_mode
+    elif is_record_mode:
+        raw_mode = "record"
+    elif marker_mode in ("auto", "record", "replay", "fork"):
+        raw_mode = marker_mode
+    else:
+        raw_mode = "auto"
+
+    mode_val = cast(SessionMode, raw_mode)
+    auto_patch = bool(marker.kwargs.get("auto_patch", True)) if marker else True
+    return cassette_path, mode_val, auto_patch
 
 
 @pytest.fixture(autouse=True)
@@ -44,22 +82,7 @@ def _rerunner_marker_autouse(
         yield
         return
 
-    cassette_path = "cassette.jsonl"
-    if marker.args:
-        cassette_path = str(marker.args[0])
-    elif "cassette" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette"])
-    elif "cassette_path" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette_path"])
-
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    raw_mode = marker.kwargs.get("mode", "record" if is_record_mode else "auto")
-    mode_val: SessionMode = cast(
-        SessionMode,
-        raw_mode if raw_mode in ("auto", "record", "replay", "fork") else "auto",
-    )
-    auto_patch = bool(marker.kwargs.get("auto_patch", True))
-
+    cassette_path, mode_val, auto_patch = _resolve_pytest_cassette_and_mode(request)
     with Session(cassette_path=cassette_path, mode=mode_val, auto_patch=auto_patch):
         yield
 
@@ -76,19 +99,13 @@ def rerunner_transport(
         yield active_session.transport
         return
 
-    marker = request.node.get_closest_marker("rerunner")
-    cassette_path = "cassette.jsonl"
-    if marker and marker.args:
-        cassette_path = str(marker.args[0])
-    elif marker and "cassette" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette"])
-    elif marker and "cassette_path" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette_path"])
+    cassette_path, mode_val, _ = _resolve_pytest_cassette_and_mode(request)
+    # CassetteTransport does not accept 'auto'; default standalone fixture to 'replay' unless recorded
+    transport_mode: Literal["record", "replay", "fork"] = (
+        "record" if mode_val == "record" else ("fork" if mode_val == "fork" else "replay")
+    )
 
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    mode: Literal["record", "replay"] = "record" if is_record_mode else "replay"
-
-    transport = CassetteTransport(cassette_path=cassette_path, mode=mode)
+    transport = CassetteTransport(cassette_path=cassette_path, mode=transport_mode)
     yield transport
     transport.close()
 
@@ -102,27 +119,9 @@ def rerunner_session(
 
     active_session = get_active_session()
     if active_session is not None:
-        yield active_session
+        yield cast(Session, active_session)
         return
 
-    marker = request.node.get_closest_marker("rerunner")
-    cassette_path = "cassette.jsonl"
-    if marker and marker.args:
-        cassette_path = str(marker.args[0])
-    elif marker and "cassette" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette"])
-    elif marker and "cassette_path" in marker.kwargs:
-        cassette_path = str(marker.kwargs["cassette_path"])
-
-    is_record_mode = bool(request.config.getoption("--rerunner-record", False))
-    raw_mode = (
-        marker.kwargs.get("mode", "record" if is_record_mode else "auto") if marker else "auto"
-    )
-    mode_val: SessionMode = cast(
-        SessionMode,
-        raw_mode if raw_mode in ("auto", "record", "replay", "fork") else "auto",
-    )
-    auto_patch = bool(marker.kwargs.get("auto_patch", True)) if marker else True
-
+    cassette_path, mode_val, auto_patch = _resolve_pytest_cassette_and_mode(request)
     with Session(cassette_path=cassette_path, mode=mode_val, auto_patch=auto_patch) as session:
         yield session
