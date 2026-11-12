@@ -97,6 +97,7 @@ dev = [
     "hypothesis>=6.98.0",
     "ruff>=0.4.0",
     "mypy>=1.10.0",
+    "import-linter>=2.0.0",
     "openai>=1.30.0",
     "anthropic>=0.28.0",
     "zstandard>=0.22.0",
@@ -172,4 +173,42 @@ asyncio_mode = "auto"
 markers = [
     "rerunner: mark test to record or replay using a rerunner cassette",
     "asyncio: mark test as asyncio",
+]
+
+[tool.importlinter]
+root_package = "rerunner"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Clean inward dependency layers"
+type = "layers"
+layers = [
+    "rerunner.cli | rerunner.pytest_plugin",
+    "rerunner.integrations | rerunner.eval_exporter | rerunner.otel | rerunner.reports",
+    "rerunner.session",
+    "rerunner.transport | rerunner.async_transport | rerunner.patcher",
+    "rerunner.side_effects",
+    "rerunner.cassette",
+    "rerunner.matcher | rerunner.storage",
+    "rerunner.integrity",
+    "rerunner.sanitizer | rerunner.models",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core engine stays independent of httpx and CLI/frameworks"
+type = "forbidden"
+source_modules = [
+    "rerunner.models",
+    "rerunner.integrity",
+    "rerunner.sanitizer",
+    "rerunner.matcher",
+    "rerunner.storage",
+    "rerunner.cassette",
+    "rerunner.side_effects",
+]
+forbidden_modules = [
+    "httpx",
+    "typer",
+    "rich",
+    "pytest",
 ]

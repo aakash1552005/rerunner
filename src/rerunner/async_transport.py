@@ -27,6 +27,7 @@ from rerunner.sanitizer import (
     sanitize_headers,
     sanitize_url,
 )
+from rerunner.storage import cassette_exists, resolve_cassette_ref
 
 
 def _is_event_stream(headers: httpx.Headers) -> bool:
@@ -212,7 +213,7 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
         if chunk_delay_ms < 0:
             raise ValueError("chunk_delay_ms must be non-negative")
 
-        self.cassette_path = Path(cassette_path)
+        self.cassette_path, self.cassette_uri = resolve_cassette_ref(cassette_path)
         self.mode = mode
         self.fork_step = fork_step
         self.real_transport = real_transport or httpx.AsyncHTTPTransport()
@@ -228,12 +229,12 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
 
         if cassette is not None:
             self.cassette = cassette
-        elif self.mode in ("replay", "fork") and self.cassette_path.exists():
-            self.cassette = Cassette.load(self.cassette_path)
+        elif self.mode in ("replay", "fork") and cassette_exists(self.cassette_uri):
+            self.cassette = Cassette.load(self.cassette_uri)
             if self.mode == "fork" and self.fork_step is not None:
                 self.cassette.truncate_after_step(self.fork_step)
         else:
-            self.cassette = Cassette(self.cassette_path)
+            self.cassette = Cassette(self.cassette_uri)
 
     @property
     def current_step(self) -> int:
@@ -260,9 +261,9 @@ class AsyncCassetteTransport(httpx.AsyncBaseTransport):
         )
 
         if should_replay:
-            if not self.cassette_path.exists() and not self.cassette.entries:
+            if not self.cassette.entries and not cassette_exists(self.cassette_uri):
                 raise FileNotFoundError(
-                    f"Cassette file not found in replay mode: {self.cassette_path}"
+                    f"Cassette file not found in replay mode: {self.cassette_uri}"
                 )
 
             match = self.cassette.find_http_match(

@@ -48,6 +48,40 @@ def test_cli_inspect_command(tmp_path: Path) -> None:
     assert "27.5ms" in result.output
 
 
+def test_cli_inspect_does_not_truncate_url_at_80_columns(tmp_path: Path) -> None:
+    narrow_runner = CliRunner(env={"COLUMNS": "80"})
+    cassette_file = tmp_path / "inspect_narrow.jsonl"
+    cassette = Cassette(cassette_file)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="POST",
+                url="https://api.openai.com/v1/chat/completions",
+                request_key="key1",
+            ),
+            response=RecordedResponse(
+                status_code=200,
+                body='{"choices": [], "usage": {"total_tokens": 42}}',
+            ),
+        )
+    )
+    cassette.save()
+
+    result = narrow_runner.invoke(app, ["inspect", str(cassette_file)])
+    assert result.exit_code == 0
+    # Reconstruct text from column 3 ("Method / URL / Function") across folded table rows
+    target_fragments = [
+        line.split("│")[3].strip()
+        for line in result.output.splitlines()
+        if line.count("│") >= 7 and "Method / URL / Function" not in line
+    ]
+    joined_target = "".join(target_fragments)
+    assert "api.openai.com/v1/chat/completions" in joined_target
+    assert "…" not in result.output
+
+
 def test_cli_diff_identical_cassettes(tmp_path: Path) -> None:
     cassette_a = tmp_path / "a.jsonl"
     cassette_b = tmp_path / "b.jsonl"

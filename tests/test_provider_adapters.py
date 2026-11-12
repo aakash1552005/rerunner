@@ -21,10 +21,35 @@ def test_registered_adapters_discovered():
     assert "anthropic" in adapter_names
     assert "google_genai" in adapter_names
     assert "bedrock" in adapter_names
+    assert "cohere" in adapter_names
     assert "langchain" in adapter_names
     assert "autogen" in adapter_names
     assert "semantic_kernel" in adapter_names
     assert "httpx" in adapter_names
+
+
+def test_wrap_cohere_adapter_auto_detection(tmp_path):
+    """Verify CohereAdapter is auto-selected by unified rerunner.wrap()."""
+
+    class FakeHttpxWrapper:
+        def __init__(self):
+            self.httpx_client = httpx.Client()
+
+    class FakeClientWrapper:
+        def __init__(self):
+            self.httpx_client = FakeHttpxWrapper()
+
+    class FakeCohereClient:
+        def __init__(self):
+            self._client_wrapper = FakeClientWrapper()
+
+    client = FakeCohereClient()
+    cassette_file = tmp_path / "cohere_wrap.jsonl"
+    wrapped = wrap(client, cassette_file, mode="record")
+
+    assert wrapped is client
+    inner_http = client._client_wrapper.httpx_client.httpx_client
+    assert str(inner_http._transport.cassette_path) == str(cassette_file)
 
 
 def test_wrap_sync_httpx_client(tmp_path):

@@ -148,3 +148,63 @@ def test_session_forwards_pii_redactor_to_transports(tmp_path: Path) -> None:
 
     with fork(cassette_file, step=1, pii_redactor=redactor) as session:
         assert session.transport.pii_redactor is redactor
+
+
+@pytest.mark.parametrize(
+    "remote_uri",
+    [
+        "s3://rerunner-test-bucket/cassettes/run.cassette.zst",
+        "gs://rerunner-test-bucket/cassettes/run.jsonl",
+        "az://rerunner-container/cassettes/run.jsonl",
+        "azure://rerunner-container/cassettes/run.zst",
+    ],
+)
+def test_session_preserves_remote_uris_and_roundtrips(
+    remote_uri: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify Session, Cassette, and Transports preserve cloud URIs instead of calling Path()."""
+    from rerunner.storage import BaseStorageBackend
+
+    memory_store: dict[str, bytes] = {}
+
+    class MemoryRemoteBackend(BaseStorageBackend):
+        def read_bytes(self, uri: str) -> bytes:
+            if uri not in memory_store:
+                raise FileNotFoundError(uri)
+            return memory_store[uri]
+
+        def write_bytes(self, uri: str, data: bytes) -> None:
+            memory_store[uri] = data
+
+        def exists(self, uri: str) -> bool:
+            return uri in memory_store
+
+        def delete(self, uri: str) -> None:
+            memory_store.pop(uri, None)
+
+    backend = MemoryRemoteBackend()
+    monkeypatch.setattr("rerunner.session.get_storage_backend", lambda _uri: backend)
+    monkeypatch.setattr("rerunner.storage.get_storage_backend", lambda _uri: backend)
+    monkeypatch.setattr("rerunner.cassette.get_storage_backend", lambda _uri: backend)
+
+    mock_transport = httpx.MockTransport(_mock_handler)
+
+    # 1. Auto mode against missing remote URI resolves to 'record' and persists in backend
+    with Session(remote_uri, mode="auto") as session:
+        assert session.mode == "record"
+        assert session.cassette_uri == remote_uri
+        assert session.cassette_path == remote_uri
+        assert session.transport.cassette_uri == remote_uri
+        assert session.async_transport.cassette_uri == remote_uri
+        session.transport.real_transport = mock_transport
+        resp = session.get_client().get("https://api.example.com/test")
+        assert resp.status_code == 200
+
+    assert remote_uri in memory_store
+
+    # 2. Auto mode against existing remote URI resolves to 'replay' without touching local disk
+    with Session(remote_uri, mode="auto") as session:
+        assert session.mode == "replay"
+        resp = session.get_client().get("https://api.example.com/test")
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "hello"

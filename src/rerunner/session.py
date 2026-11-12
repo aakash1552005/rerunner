@@ -14,10 +14,10 @@ import httpx
 from rerunner.async_transport import AsyncCassetteTransport
 from rerunner.cassette import Cassette, CassetteError
 from rerunner.matcher import MatchingStrategy
-from rerunner.patcher import reset_active_session, set_active_session
+from rerunner.patcher import ActiveSessionProtocol, reset_active_session, set_active_session
 from rerunner.sanitizer import PiiRedactor
 from rerunner.side_effects import reset_active_cassette, set_active_cassette
-from rerunner.storage import get_storage_backend
+from rerunner.storage import cassette_exists, get_storage_backend, resolve_cassette_ref
 from rerunner.transport import CassetteTransport
 
 if TYPE_CHECKING:
@@ -82,7 +82,7 @@ class Session:
         semantic_threshold: float = 0.80,
         embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
-        self.cassette_path = Path(cassette_path)
+        self.cassette_path, self.cassette_uri = resolve_cassette_ref(cassette_path)
         self.requested_mode = mode
         self.fork_step = fork_step
         self.auto_patch = auto_patch
@@ -99,7 +99,7 @@ class Session:
         self.cassette: Cassette
 
         self._cassette_token: contextvars.Token[Cassette | None] | None = None
-        self._patch_token: contextvars.Token[Session | None] | None = None
+        self._patch_token: contextvars.Token[ActiveSessionProtocol | None] | None = None
 
     @property
     def mode(self) -> str:
@@ -111,11 +111,11 @@ class Session:
         env_mode = os.getenv("RERUNNER_MODE")
         mode_str = env_mode.lower().strip() if env_mode else self.requested_mode.lower().strip()
 
-        backend = get_storage_backend(str(self.cassette_path))
+        backend = get_storage_backend(self.cassette_uri)
         exists_and_non_empty = False
-        if backend.exists(str(self.cassette_path)):
+        if backend.exists(self.cassette_uri):
             try:
-                raw = backend.read_bytes(str(self.cassette_path))
+                raw = backend.read_bytes(self.cassette_uri)
                 exists_and_non_empty = len(raw.strip()) > 0
             except Exception:
                 exists_and_non_empty = False
@@ -129,7 +129,7 @@ class Session:
 
         if resolved in ("replay", "fork") and not exists_and_non_empty:
             raise CassetteMissingError(
-                f"Cassette file does not exist or is empty in {resolved} mode: {self.cassette_path}"
+                f"Cassette file does not exist or is empty in {resolved} mode: {self.cassette_uri}"
             )
 
         return resolved
@@ -137,12 +137,12 @@ class Session:
     def _setup_session(self) -> None:
         self.effective_mode = self._resolve_mode()
 
-        if self.effective_mode in ("replay", "fork") and self.cassette_path.exists():
-            self.cassette = Cassette.load(self.cassette_path)
+        if self.effective_mode in ("replay", "fork") and cassette_exists(self.cassette_uri):
+            self.cassette = Cassette.load(self.cassette_uri)
             if self.effective_mode == "fork" and self.fork_step is not None:
                 self.cassette.truncate_after_step(self.fork_step)
         else:
-            self.cassette = Cassette(self.cassette_path)
+            self.cassette = Cassette(self.cassette_uri)
 
         self.transport = CassetteTransport(
             cassette_path=self.cassette_path,
@@ -183,7 +183,7 @@ class Session:
             self._patch_token = None
 
         if self.effective_mode in ("record", "fork") and (
-            self.cassette.entries or not self.cassette_path.exists()
+            self.cassette.entries or not cassette_exists(self.cassette_uri)
         ):
             self.cassette.save()
 

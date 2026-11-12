@@ -4,14 +4,25 @@ from __future__ import annotations
 
 import contextvars
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol
 
 import httpx
 
-if TYPE_CHECKING:
-    from rerunner.session import Session
 
-_ACTIVE_SESSION: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
+class ActiveSessionProtocol(Protocol):
+    """Minimal protocol implemented by Session for zero-touch HTTPX patching."""
+
+    @property
+    def auto_patch(self) -> bool: ...
+
+    @property
+    def transport(self) -> httpx.BaseTransport: ...
+
+    @property
+    def async_transport(self) -> httpx.AsyncBaseTransport: ...
+
+
+_ACTIVE_SESSION: contextvars.ContextVar[ActiveSessionProtocol | None] = contextvars.ContextVar(
     "_rerunner_active_session", default=None
 )
 
@@ -74,14 +85,16 @@ def uninstall_auto_patch() -> None:
                 httpx.AsyncClient.__init__ = _ORIGINAL_ASYNC_INIT  # type: ignore[method-assign]
 
 
-def set_active_session(session: Session | None) -> contextvars.Token[Session | None]:
+def set_active_session(
+    session: ActiveSessionProtocol | None,
+) -> contextvars.Token[ActiveSessionProtocol | None]:
     """Set the active Session in contextvars and manage auto-patch hook reference count."""
     if session is not None and getattr(session, "auto_patch", True):
         install_auto_patch()
     return _ACTIVE_SESSION.set(session)
 
 
-def reset_active_session(token: contextvars.Token[Session | None]) -> None:
+def reset_active_session(token: contextvars.Token[ActiveSessionProtocol | None]) -> None:
     """Reset the active Session in contextvars and decrement auto-patch hook reference count."""
     current = _ACTIVE_SESSION.get()
     if current is not None and getattr(current, "auto_patch", True):
@@ -89,6 +102,6 @@ def reset_active_session(token: contextvars.Token[Session | None]) -> None:
     _ACTIVE_SESSION.reset(token)
 
 
-def get_active_session() -> Session | None:
+def get_active_session() -> ActiveSessionProtocol | None:
     """Return the active Session in the current context."""
     return _ACTIVE_SESSION.get()

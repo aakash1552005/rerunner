@@ -16,7 +16,7 @@ from rerunner.matcher import (
     normalize_url,
 )
 from rerunner.models import CassetteEntry, CassetteMetadata
-from rerunner.storage import detect_compression, get_storage_backend
+from rerunner.storage import detect_compression, get_storage_backend, is_remote_uri
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -54,11 +54,7 @@ class Cassette:
     def set_destination(self, path: Path | str) -> None:
         """Update cassette target URI and local filesystem path."""
         self.uri = str(path)
-        self._path = (
-            Path(path)
-            if not (self.uri.startswith("s3://") or self.uri.startswith("gs://"))
-            else Path(self.uri.split("/")[-1])
-        )
+        self._path = Path(self.uri.split("/")[-1]) if is_remote_uri(self.uri) else Path(path)
 
     @classmethod
     def load(cls, path: Path | str, verify_integrity: bool = True) -> Cassette:

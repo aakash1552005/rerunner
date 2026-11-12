@@ -72,7 +72,7 @@ Our mission is to establish **Rerunner** as the standard deterministic test runn
 - [x] **Real-Time Terminal TUI Flight Deck**: Interactive erunner tui\ dashboard for visually inspecting multi-agent trajectories (Issue #36)
 - [x] **Enterprise Multi-Cloud Backends**: Microsoft Azure Blob Storage (\z://\) and AWS Bedrock Converse API adapter
 - [x] **Pluggable Sether PII Redaction Backend**: Protocol-based international phone and credit card masking (PR #37)
-- [ ] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets (JSONL, HuggingFace, Argilla)
+- [x] **Cassette-to-Eval Dataset Exporter**: Convert recorded agent trajectories into evaluation regression datasets (OpenAI ChatCompletion, ShareGPT, HuggingFace Alpaca JSONL via `rerunner export-eval`)
 
 ---
 
