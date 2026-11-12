@@ -12,84 +12,21 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rerunner.cassette import Cassette
-from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
-from rerunner.models import CassetteEntry
-from rerunner.sanitizer import (
-    find_sensitive_leaks,
-    sanitize_chunks,
-    sanitize_headers,
-    sanitize_payload,
-    sanitize_string,
-    sanitize_url,
+from rerunner.cassette_ops import (
+    diff_cassettes_report,
+    extract_detailed_tokens_from_body,
+    extract_entry_info,
+    extract_tokens_from_body,
+    scrub_cassette_file,
+    verify_cassette_report,
 )
+from rerunner.mcp_server import serve_stdio
 from rerunner.reports import export_cost_html_report
+from rerunner.setup_wizard import configure_clients
 
-
-def _extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
-    result = {"prompt": 0, "completion": 0, "total": 0}
-    if not body_str:
-        return result
-    try:
-        data = json.loads(body_str)
-        if isinstance(data, dict):
-            usage = data.get("usage")
-            if isinstance(usage, dict):
-                prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
-                comp = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-                total = usage.get("total_tokens")
-                if total is None or not isinstance(total, int):
-                    total = int(prompt) + int(comp)
-                result["prompt"] = int(prompt) if isinstance(prompt, (int, float)) else 0
-                result["completion"] = int(comp) if isinstance(comp, (int, float)) else 0
-                result["total"] = int(total)
-    except (json.JSONDecodeError, TypeError, ValueError, KeyError):
-        pass
-    return result
-
-
-def _extract_tokens_from_body(body_str: str) -> int | None:
-    tokens = _extract_detailed_tokens_from_body(body_str)["total"]
-    return tokens if tokens > 0 else None
-
-
-def _extract_entry_info(entry: CassetteEntry) -> dict[str, Any]:
-    step = entry.step
-    if entry.entry_type == "http" and entry.request and entry.response:
-        entry_type = "HTTP"
-        target = f"{entry.request.method} {entry.request.url}"
-        status = str(entry.response.status_code)
-        streaming = "Yes" if entry.response.is_streaming else "No"
-        tokens = _extract_tokens_from_body(entry.response.body)
-        latency = (
-            f"{sum(entry.response.chunk_delays_ms):.1f}ms"
-            if entry.response.chunk_delays_ms and sum(entry.response.chunk_delays_ms) > 0
-            else "-"
-        )
-    elif entry.entry_type in ("side_effect", "tool"):
-        entry_type = "Tool"
-        target = f"{entry.side_effect_name or 'tool'}(...)"
-        status = "Error" if entry.side_effect_exception else "OK"
-        streaming = "-"
-        tokens = None
-        latency = "-"
-    else:
-        entry_type = "Unknown"
-        target = "Unknown payload"
-        status = "-"
-        streaming = "-"
-        tokens = None
-        latency = "-"
-
-    return {
-        "step": step,
-        "type": entry_type,
-        "target": target,
-        "status": status,
-        "streaming": streaming,
-        "tokens": tokens,
-        "latency": latency,
-        "entry": entry,
-    }
+_extract_detailed_tokens_from_body = extract_detailed_tokens_from_body
+_extract_tokens_from_body = extract_tokens_from_body
+_extract_entry_info = extract_entry_info
 
 
 app = typer.Typer(
@@ -201,49 +138,19 @@ def verify(
 ) -> None:
     """Verify cryptographic integrity, scan for leaked API keys/PII, and display savings summary."""
     try:
-        cassette = Cassette.load(cassette_path, verify_integrity=False)
+        report = verify_cassette_report(cassette_path, strict_security=strict_security)
     except Exception as exc:
         console.print(f"[bold red]Error loading cassette:[/] {exc}")
         sys.exit(1)
 
-    # 1. Cryptographic SHA-256 integrity check
-    is_valid, error = verify_cassette_integrity(cassette.entries)
-    if not is_valid:
-        console.print(f"[bold red]❌ INTEGRITY FAILURE:[/] {error}")
+    if not report["integrity_valid"]:
+        console.print(f"[bold red]❌ INTEGRITY FAILURE:[/] {report['integrity_error']}")
         sys.exit(1)
     console.print(
-        f"[bold green]✔ Cryptographic integrity verified successfully ({len(cassette.entries)} chained steps).[/]"
+        f"[bold green]✔ Cryptographic integrity verified successfully ({report['total_steps']} chained steps).[/]"
     )
 
-    # 2. Scan for unredacted API keys and PII leaks
-    all_leaks: list[str] = []
-    total_chars = 0
-    http_steps = 0
-    side_effect_steps = 0
-
-    for entry in cassette.entries:
-        if entry.entry_type == "http" and entry.request and entry.response:
-            http_steps += 1
-            total_chars += len(entry.request.body) + len(entry.response.body)
-            all_leaks.extend(find_sensitive_leaks(entry.request.url))
-            all_leaks.extend(find_sensitive_leaks(entry.request.headers))
-            all_leaks.extend(find_sensitive_leaks(entry.request.body))
-            all_leaks.extend(find_sensitive_leaks(entry.response.headers))
-            all_leaks.extend(find_sensitive_leaks(entry.response.body))
-            all_leaks.extend(find_sensitive_leaks(entry.response.chunks))
-        elif entry.entry_type in ("side_effect", "tool"):
-            side_effect_steps += 1
-            if entry.side_effect_args:
-                all_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
-            if entry.side_effect_kwargs:
-                all_leaks.extend(find_sensitive_leaks(entry.side_effect_kwargs))
-            if entry.side_effect_result:
-                all_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
-            if entry.side_effect_exception:
-                all_leaks.extend(find_sensitive_leaks(entry.side_effect_exception))
-
-    all_leaks = list(dict.fromkeys(all_leaks))
-
+    all_leaks: list[str] = report["leaks"]
     if all_leaks:
         console.print("[bold red]❌ SECURITY WARNING - Leaks Detected:[!]")
         for leak in all_leaks:
@@ -258,25 +165,22 @@ def verify(
             "[bold green]✔ Security scan passed: Zero leaked API keys or PII detected.[/]"
         )
 
-    # 3. Calculate and display savings summary
-    est_tokens = max(0, total_chars // 4)
-    est_dollars_saved = (est_tokens / 1_000_000) * 10.0
-    est_duration_saved = http_steps * 1.8
-
     summary_table = Table(
         title="Cassette Verification & Savings Summary", show_header=True, header_style="bold green"
     )
     summary_table.add_column("Property", style="cyan")
     summary_table.add_column("Value", style="bold yellow")
     summary_table.add_row("Cassette File", cassette_path.name)
-    summary_table.add_row("Total Steps", str(len(cassette.entries)))
-    summary_table.add_row("HTTP Requests", str(http_steps))
-    summary_table.add_row("Side Effects", str(side_effect_steps))
+    summary_table.add_row("Total Steps", str(report["total_steps"]))
+    summary_table.add_row("HTTP Requests", str(report["http_steps"]))
+    summary_table.add_row("Side Effects", str(report["side_effect_steps"]))
     summary_table.add_row("SHA-256 Hash Chaining", "Verified ✔")
     summary_table.add_row("PII / Secret Redaction", "Passed ✔" if not all_leaks else "Failed ❌")
-    summary_table.add_row("Estimated Tokens Saved", f"{est_tokens:,}")
-    summary_table.add_row("Estimated API Cost Saved", f"${est_dollars_saved:.4f}")
-    summary_table.add_row("Estimated CI Time Saved", f"{est_duration_saved:.1f}s")
+    summary_table.add_row("Estimated Tokens Saved", f"{report['estimated_tokens_saved']:,}")
+    summary_table.add_row("Estimated API Cost Saved", f"${report['estimated_cost_saved_usd']:.4f}")
+    summary_table.add_row(
+        "Estimated CI Time Saved", f"{report['estimated_time_saved_seconds']:.1f}s"
+    )
 
     console.print(summary_table)
     console.print("[bold green]✔ Cassette verified successfully! Ready for Git commit.[/]")
@@ -294,8 +198,7 @@ def diff(
 ) -> None:
     """Compare two cassettes step-by-step and highlight drift in calls, prompts, and tokens."""
     try:
-        c1 = Cassette.load(cassette_a, verify_integrity=False)
-        c2 = Cassette.load(cassette_b, verify_integrity=False)
+        report = diff_cassettes_report(cassette_a, cassette_b)
     except Exception as exc:
         console.print(f"[bold red]Error loading cassettes for comparison:[/] {exc}")
         raise typer.Exit(code=1) from exc
@@ -307,94 +210,30 @@ def diff(
     table.add_column(f"{cassette_b.name}", style="green")
     table.add_column("Drift Status", width=18)
 
-    max_len = max(len(c1.entries), len(c2.entries))
-    has_drift = False
-    tokens_a = 0
-    tokens_b = 0
-
-    added_steps = 0
-    removed_steps = 0
-    prompt_diffs = 0
-    status_diffs = 0
-
-    for i in range(max_len):
-        e1 = c1.entries[i] if i < len(c1.entries) else None
-        e2 = c2.entries[i] if i < len(c2.entries) else None
-
-        info1 = _extract_entry_info(e1) if e1 else None
-        info2 = _extract_entry_info(e2) if e2 else None
-
-        if info1 and info1["tokens"]:
-            tokens_a += info1["tokens"]
-        if info2 and info2["tokens"]:
-            tokens_b += info2["tokens"]
-
-        step_type = info1["type"] if info1 else (info2["type"] if info2 else "Unknown")
-        target1 = f"{info1['target']} [{info1['status']}]" if info1 else "[red]<Missing>[/]"
-        target2 = f"{info2['target']} [{info2['status']}]" if info2 else "[red]<Missing>[/]"
-
-        step_drift = False
-        drift_reason = []
-
-        if e1 is None:
-            has_drift = True
-            step_drift = True
-            added_steps += 1
-            drift_reason.append("Added in B")
-        elif e2 is None:
-            has_drift = True
-            step_drift = True
-            removed_steps += 1
-            drift_reason.append("Removed from B")
-        else:
-            if info1 and info2 and info1["type"] != info2["type"]:
-                has_drift = True
-                step_drift = True
-                drift_reason.append("Type mismatch")
-            elif info1 and info2 and info1["target"] != info2["target"]:
-                has_drift = True
-                step_drift = True
-                drift_reason.append("Target modified")
-            elif info1 and info2 and info1["status"] != info2["status"]:
-                has_drift = True
-                step_drift = True
-                status_diffs += 1
-                drift_reason.append(f"Status ({info1['status']} != {info2['status']})")
-
-            # Check prompt modifications
-            if e1.entry_type == "http" and e2.entry_type == "http":
-                if e1.request and e2.request and e1.request.body != e2.request.body:
-                    has_drift = True
-                    step_drift = True
-                    prompt_diffs += 1
-                    drift_reason.append("Prompt modified")
-            elif (
-                e1.entry_type in ("side_effect", "tool")
-                and e2.entry_type in ("side_effect", "tool")
-                and (
-                    e1.side_effect_args != e2.side_effect_args
-                    or e1.side_effect_kwargs != e2.side_effect_kwargs
-                )
-            ):
-                has_drift = True
-                step_drift = True
-                prompt_diffs += 1
-                drift_reason.append("Tool args modified")
-
-        drift_badge = f"[red]{', '.join(drift_reason)}[/]" if step_drift else "[green]MATCH[/]"
-        table.add_row(str(i + 1), step_type, target1, target2, drift_badge)
+    for step in report["steps"]:
+        target1 = (
+            f"{step['a_target']} [{step['a_status']}]" if step["a_target"] else "[red]<Missing>[/]"
+        )
+        target2 = (
+            f"{step['b_target']} [{step['b_status']}]" if step["b_target"] else "[red]<Missing>[/]"
+        )
+        drift_badge = (
+            f"[red]{', '.join(step['reasons'])}[/]" if step["drift"] else "[green]MATCH[/]"
+        )
+        table.add_row(str(step["index"]), step["type"], target1, target2, drift_badge)
 
     console.print(table)
 
-    token_delta = tokens_b - tokens_a
+    token_delta = report["token_delta"]
     sign = "+" if token_delta > 0 else ""
+    has_drift = report["has_drift"]
 
     summary_panel = Panel(
-        f"[bold cyan]Cassette A:[/] {cassette_a} ({len(c1.entries)} steps, {tokens_a:,} tokens)\n"
-        f"[bold cyan]Cassette B:[/] {cassette_b} ({len(c2.entries)} steps, {tokens_b:,} tokens)\n"
+        f"[bold cyan]Cassette A:[/] {cassette_a} ({report['steps_a']} steps, {report['tokens_a']:,} tokens)\n"
+        f"[bold cyan]Cassette B:[/] {cassette_b} ({report['steps_b']} steps, {report['tokens_b']:,} tokens)\n"
         f"[bold cyan]Token Delta:[/] {sign}{token_delta:,} tokens\n"
-        f"[bold cyan]Added Steps:[/] {added_steps} | [bold cyan]Removed Steps:[/] {removed_steps}\n"
-        f"[bold cyan]Prompt Modifications:[/] {prompt_diffs} | [bold cyan]Status Diffs:[/] {status_diffs}",
+        f"[bold cyan]Added Steps:[/] {report['added_steps']} | [bold cyan]Removed Steps:[/] {report['removed_steps']}\n"
+        f"[bold cyan]Prompt Modifications:[/] {report['prompt_diffs']} | [bold cyan]Status Diffs:[/] {report['status_diffs']}",
         title="[bold green]Drift & Delta Summary[/]",
         border_style="cyan" if not has_drift else "red",
     )
@@ -716,75 +555,22 @@ def scrub(
 ) -> None:
     """Scan and scrub existing cassettes of leaked API keys and PII, re-signing the SHA-256 chain."""
     try:
-        cassette = Cassette.load(cassette_path, verify_integrity=False)
+        report = scrub_cassette_file(
+            cassette_path,
+            output_path=output_path,
+            dry_run=dry_run,
+        )
     except Exception as exc:
         console.print(f"[bold red]Error loading cassette:[/] {exc}")
         raise typer.Exit(code=1) from exc
 
-    # 1. Scan before
-    initial_leaks: list[str] = []
-    for entry in cassette.entries:
-        if entry.entry_type == "http" and entry.request and entry.response:
-            initial_leaks.extend(find_sensitive_leaks(entry.request.headers))
-            initial_leaks.extend(find_sensitive_leaks(entry.request.body))
-            initial_leaks.extend(find_sensitive_leaks(entry.response.headers))
-            initial_leaks.extend(find_sensitive_leaks(entry.response.body))
-        elif entry.entry_type in ("side_effect", "tool"):
-            if entry.side_effect_args:
-                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_args))
-            if entry.side_effect_kwargs:
-                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_kwargs))
-            if entry.side_effect_result:
-                initial_leaks.extend(find_sensitive_leaks(entry.side_effect_result))
-
-    initial_leaks = list(dict.fromkeys(initial_leaks))
-
-    # 2. Scrub entries
-    scrubbed_count = 0
-    expected_prev = "GENESIS"
-
-    for entry in cassette.entries:
-        if entry.entry_type == "http" and entry.request and entry.response:
-            entry.request.url = sanitize_url(entry.request.url)
-            entry.request.headers = sanitize_headers(entry.request.headers)
-            try:
-                body_json = json.loads(entry.request.body)
-                entry.request.body = json.dumps(sanitize_payload(body_json), separators=(",", ":"))
-            except Exception:
-                entry.request.body = sanitize_string(entry.request.body)
-
-            entry.response.headers = sanitize_headers(entry.response.headers)
-            try:
-                body_json = json.loads(entry.response.body)
-                entry.response.body = json.dumps(sanitize_payload(body_json), separators=(",", ":"))
-            except Exception:
-                entry.response.body = sanitize_string(entry.response.body)
-
-            if entry.response.chunks:
-                entry.response.chunks = sanitize_chunks(entry.response.chunks)
-            scrubbed_count += 1
-        elif entry.entry_type in ("side_effect", "tool"):
-            if entry.side_effect_args:
-                entry.side_effect_args = sanitize_payload(entry.side_effect_args)
-            if entry.side_effect_kwargs:
-                entry.side_effect_kwargs = sanitize_payload(entry.side_effect_kwargs)
-            if entry.side_effect_result:
-                entry.side_effect_result = sanitize_payload(entry.side_effect_result)
-            scrubbed_count += 1
-
-        # Re-compute cryptographic hash chain
-        entry.prev_hash = expected_prev
-        entry.entry_hash = compute_entry_hash(entry, expected_prev)
-        expected_prev = entry.entry_hash
-
-    cassette._last_hash = expected_prev
-
-    target = output_path or cassette_path
+    initial_leaks: list[str] = report["initial_leaks"]
+    target = report["target"]
 
     if dry_run:
         console.print(
             Panel(
-                f"[bold yellow]DRY RUN:[/] Scanned [bold cyan]{len(cassette.entries)}[/] steps.\n"
+                f"[bold yellow]DRY RUN:[/] Scanned [bold cyan]{report['total_steps']}[/] steps.\n"
                 f"Detected [bold red]{len(initial_leaks)}[/] leak categories.\n"
                 f"[dim]No changes were saved to {target}[/]",
                 title="🧹 Scrub Simulation",
@@ -793,14 +579,11 @@ def scrub(
         )
         return
 
-    cassette.path = target
-    cassette.save()
-
     console.print(
         Panel(
             f"[bold green]✔ Successfully scrubbed and re-signed cassette![/]\n"
             f"[bold cyan]File:[/] {target}\n"
-            f"[bold cyan]Steps Scrubbed & Re-hashed:[/] {scrubbed_count}\n"
+            f"[bold cyan]Steps Scrubbed & Re-hashed:[/] {report['scrubbed_steps']}\n"
             f"[bold cyan]Sensitive Leaks Neutralized:[/] {len(initial_leaks)}\n"
             f"[dim]Cryptographic SHA-256 chain updated from GENESIS.[/]",
             title="🧹 Cassette Scrubbed",
@@ -1055,6 +838,104 @@ def tui(
     selected_idx = min(max(step if step is not None else 0, 0), len(cassette.entries) - 1)
     layout = _render_flight_deck(cassette, cassette_path, selected_idx)
     console.print(layout)
+
+
+@app.command()
+def mcp() -> None:
+    """Start Rerunner's zero-dependency stdio MCP (Model Context Protocol) server."""
+    serve_stdio()
+
+
+@app.command()
+def setup(
+    clients: str = typer.Option(
+        "claude-project",
+        "--clients",
+        "-c",
+        help="Comma-separated agent clients (claude-project,claude,cursor,codex,all).",
+    ),
+    project_dir: Path | None = typer.Option(
+        None,
+        "--project-dir",
+        "-p",
+        help="Target workspace directory (defaults to current working directory).",
+    ),
+    command: str = typer.Option(
+        "rerunner",
+        "--command",
+        help="Executable command written into the MCP config entry.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview planned config changes without writing files.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Apply changes without interactive confirmation prompt.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Do not create .bak files before modifying existing configs.",
+    ),
+) -> None:
+    """Configure coding-agent MCP integration (Claude Code, Cursor, Codex)."""
+    try:
+        planned = configure_clients(
+            clients,
+            project_dir=project_dir,
+            command=command,
+            dry_run=True,
+            backup=not no_backup,
+        )
+    except ValueError as exc:
+        console.print(f"[bold red]Setup error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if dry_run:
+        for item in planned:
+            console.print(f"[yellow]{item.status.upper()}[/] [{item.client}] -> {item.path}")
+        return
+
+    if not yes:
+        console.print("[bold cyan]Planned Rerunner MCP configuration targets:[/]")
+        for item in planned:
+            console.print(f"  • {item.client}: {item.path} ({item.status})")
+        if not typer.confirm("Write Rerunner MCP configuration to these files?", default=True):
+            console.print("[yellow]Setup cancelled.[/]")
+            raise typer.Exit(code=0)
+
+    try:
+        actions = configure_clients(
+            clients,
+            project_dir=project_dir,
+            command=command,
+            dry_run=False,
+            backup=not no_backup,
+        )
+    except Exception as exc:
+        console.print(f"[bold red]Failed to apply setup:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    table = Table(title="Rerunner Agent Setup", show_header=True, header_style="bold cyan")
+    table.add_column("Client", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Config Path")
+    table.add_column("Backup", style="dim")
+
+    for act in actions:
+        table.add_row(
+            act.client,
+            act.status,
+            str(act.path),
+            str(act.backup_path) if act.backup_path else "-",
+        )
+
+    console.print(table)
+    console.print("[bold green]✔ Rerunner MCP configuration complete![/]")
 
 
 if __name__ == "__main__":

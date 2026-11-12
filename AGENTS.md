@@ -7,9 +7,9 @@ See [`CLAUDE.md`](CLAUDE.md) for the core engineering invariants (non-blocking S
 Dependencies strictly flow inward — enforced automatically in CI by `lint-imports` (configured in [`pyproject.toml`](pyproject.toml)) and visualized in [`docs/architecture/architecture.mermaid`](docs/architecture/architecture.mermaid):
 
 1. **Domain & Safety Primitives (`models.py`, `integrity.py`, `sanitizer.py`)**: Pure data contracts, SHA-256/HMAC chaining, and redaction. Never imports `httpx`, `typer`, `rich`, `pytest`, or transports.
-2. **Core Engine (`storage.py`, `matcher.py`, `cassette.py`, `side_effects.py`)**: Persistence, matching, and side-effect guards. Never imports transports, sessions, CLI, or SDK frameworks.
+2. **Core Engine (`storage.py`, `matcher.py`, `cassette.py`, `cassette_ops.py`, `side_effects.py`)**: Persistence, matching, cassette analytics/scrubbing/diffing, and side-effect guards. Never imports transports, sessions, CLI, or SDK frameworks.
 3. **Transports & Session (`transport.py`, `async_transport.py`, `patcher.py`, `session.py`)**: HTTPX interception and lifecycle orchestration. `patcher.py` communicates with `Session` strictly through `ActiveSessionProtocol` so there are no import cycles.
-4. **Adapters & Exporters (`integrations/`, `otel.py`, `eval_exporter.py`, `reports.py`)**: SDK wrappers and telemetry/eval/HTML exporters.
+4. **Adapters, Exporters & Agent Integration (`integrations/`, `mcp_server.py`, `setup_wizard.py`, `otel.py`, `eval_exporter.py`, `reports.py`)**: SDK wrappers, stdio MCP server, setup wizard, and telemetry/eval/HTML exporters.
 5. **Entry Points (`cli.py`, `pytest_plugin.py`)**: User-facing CLI and Pytest plugin.
 
 ## Required Local Checks

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "rerunner",
+  "description": "Deterministic flight recorder, replay engine, and CI regression testing for AI agents.",
+  "owner": {
+    "name": "AAKASH S S",
+    "url": "https://github.com/aakash1552005"
+  },
+  "plugins": [
+    {
+      "name": "rerunner",
+      "description": "Inspect AI agent cassettes, scrub PII/secrets, diff trajectories, fork failed steps, and generate deterministic pytest tests via MCP.",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}
+
