@@ -511,4 +511,3 @@ def serve_stdio(
             encoded = (json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8")
             out_stream.write(encoded)
             out_stream.flush()
-
