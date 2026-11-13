@@ -79,20 +79,35 @@ def estimate_entry_cost_usd(
     completion_tokens: int,
     total_tokens: int,
     model: str | None = None,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
 ) -> float:
-    """Calculate estimated API USD cost for a single recorded step."""
+    """Calculate estimated API USD cost for a single recorded step, accounting for prompt caching."""
     in_rate, out_rate = resolve_model_pricing(model)
-    if prompt_tokens > 0 or completion_tokens > 0:
-        return (prompt_tokens / 1_000_000.0) * in_rate + (
-            completion_tokens / 1_000_000.0
-        ) * out_rate
+    if (
+        prompt_tokens > 0
+        or completion_tokens > 0
+        or cache_creation_input_tokens > 0
+        or cache_read_input_tokens > 0
+    ):
+        base_cost = (prompt_tokens / 1_000_000.0) * in_rate
+        completion_cost = (completion_tokens / 1_000_000.0) * out_rate
+        cache_write_cost = (cache_creation_input_tokens / 1_000_000.0) * (in_rate * 1.25)
+        cache_read_cost = (cache_read_input_tokens / 1_000_000.0) * (in_rate * 0.10)
+        return base_cost + completion_cost + cache_write_cost + cache_read_cost
     blended_rate = (in_rate + out_rate) / 2.0
     return (max(0, total_tokens) / 1_000_000.0) * blended_rate
 
 
 def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
-    """Extract prompt, completion, and total token counts from a JSON response body."""
-    result = {"prompt": 0, "completion": 0, "total": 0}
+    """Extract prompt, completion, total, and prompt-caching token counts from a JSON response body."""
+    result = {
+        "prompt": 0,
+        "completion": 0,
+        "total": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
     if not body_str:
         return result
     try:
@@ -102,11 +117,25 @@ def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
             if isinstance(usage, dict):
                 prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
                 comp = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+                cache_creation = (
+                    usage.get("cache_creation_input_tokens")
+                    or usage.get("cache_creation_tokens")
+                    or 0
+                )
+                cache_read = (
+                    usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens") or 0
+                )
                 total = usage.get("total_tokens")
                 if total is None or not isinstance(total, int):
-                    total = int(prompt) + int(comp)
+                    total = int(prompt) + int(comp) + int(cache_creation) + int(cache_read)
                 result["prompt"] = int(prompt) if isinstance(prompt, (int, float)) else 0
                 result["completion"] = int(comp) if isinstance(comp, (int, float)) else 0
+                result["cache_creation_input_tokens"] = (
+                    int(cache_creation) if isinstance(cache_creation, (int, float)) else 0
+                )
+                result["cache_read_input_tokens"] = (
+                    int(cache_read) if isinstance(cache_read, (int, float)) else 0
+                )
                 result["total"] = int(total)
     except (json.JSONDecodeError, TypeError, ValueError, KeyError):
         pass
