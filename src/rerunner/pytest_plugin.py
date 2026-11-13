@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 
+import contextlib
+import os
 import re
 from collections.abc import Generator
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 
@@ -54,11 +56,9 @@ def default_cassette_path_for_node(node: pytest.Item) -> str:
     return (Path("tests/cassettes") / module_slug / f"{test_slug}.jsonl").as_posix()
 
 
-def _resolve_pytest_cassette_and_mode(
-    request: pytest.FixtureRequest,
-) -> tuple[str, SessionMode, bool]:
-    """Extract cassette path, effective session mode, and auto_patch flag for a test node."""
-    marker = request.node.get_closest_marker("rerunner")
+def _resolve_cassette_path_for_item(node: pytest.Item) -> str:
+    """Extract raw base cassette path from a test item's markers or node ID."""
+    marker = node.get_closest_marker("rerunner")
     cassette_path: str | None = None
     if marker and marker.args:
         cassette_path = str(marker.args[0])
@@ -68,10 +68,20 @@ def _resolve_pytest_cassette_and_mode(
         cassette_path = str(marker.kwargs["cassette_path"])
 
     if not cassette_path:
-        cassette_path = default_cassette_path_for_node(request.node)
+        cassette_path = default_cassette_path_for_node(node)
+
+    return cassette_path
+
+
+def _resolve_pytest_cassette_and_mode(
+    request: pytest.FixtureRequest,
+) -> tuple[str, SessionMode, bool]:
+    """Extract cassette path, effective session mode, and auto_patch flag for a test node."""
+    cassette_path = _resolve_cassette_path_for_item(request.node)
 
     cli_mode = request.config.getoption("--rerunner-mode", None)
     is_record_mode = bool(request.config.getoption("--rerunner-record", False))
+    marker = request.node.get_closest_marker("rerunner")
     marker_mode = marker.kwargs.get("mode") if marker else None
 
     if cli_mode in ("auto", "record", "replay", "fork"):
@@ -85,6 +95,16 @@ def _resolve_pytest_cassette_and_mode(
 
     mode_val = cast(SessionMode, raw_mode)
     auto_patch = bool(marker.kwargs.get("auto_patch", True)) if marker else True
+
+    # If running inside a pytest-xdist worker process, redirect writes to a worker-specific shard.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker:
+        p = Path(cassette_path)
+        if not re.search(r"[._](?:gw\d+|worker[-_]?\d+)$", p.stem) and (
+            mode_val in ("record", "fork") or not p.exists()
+        ):
+            cassette_path = str(p.with_name(f"{p.stem}.{worker}{p.suffix}"))
+
     return cassette_path, mode_val, auto_patch
 
 
@@ -141,3 +161,75 @@ def rerunner_session(
     cassette_path, mode_val, auto_patch = _resolve_pytest_cassette_and_mode(request)
     with Session(cassette_path=cassette_path, mode=mode_val, auto_patch=auto_patch) as session:
         yield session
+
+
+def merge_worker_shards(
+    session: pytest.Session | None = None,
+    root_dir: Path | str | None = None,
+) -> list[dict[str, Any]]:
+    """Merge worker shards generated during pytest-xdist runs into unified cassettes."""
+    from rerunner.cassette_ops import merge_cassettes
+
+    targets_to_shards: dict[Path, set[Path]] = {}
+
+    def _register_shard(shard_file: Path) -> None:
+        if not shard_file.is_file() or shard_file.stat().st_size == 0:
+            return
+        match = re.search(r"[._](?:gw\d+|worker[-_]?\d+)$", shard_file.stem)
+        if not match:
+            return
+        base_stem = re.sub(r"[._](?:gw\d+|worker[-_]?\d+)$", "", shard_file.stem)
+        target = shard_file.with_name(f"{base_stem}{shard_file.suffix}").resolve()
+        targets_to_shards.setdefault(target, set()).add(shard_file.resolve())
+
+    # 1. Search near cassettes of collected items in session
+    if session is not None:
+        for item in getattr(session, "items", []):
+            with contextlib.suppress(Exception):
+                base_path_str = _resolve_cassette_path_for_item(item)
+                base_path = Path(base_path_str).resolve()
+                parent_dir = base_path.parent
+                if parent_dir.is_dir():
+                    for candidate in parent_dir.glob(f"{base_path.stem}.gw*.jsonl"):
+                        _register_shard(candidate)
+                    for candidate in parent_dir.glob(f"{base_path.stem}_gw*.jsonl"):
+                        _register_shard(candidate)
+
+    # 2. Search root_dir or common cassette directories
+    search_dirs: list[Path] = []
+    if root_dir is not None:
+        search_dirs.append(Path(root_dir))
+    elif session is not None and hasattr(session.config, "rootpath"):
+        search_dirs.append(Path(session.config.rootpath))
+    else:
+        search_dirs.append(Path.cwd())
+
+    default_dir = Path("tests/cassettes")
+    if default_dir.is_dir() and default_dir not in search_dirs:
+        search_dirs.append(default_dir)
+
+    for sdir in search_dirs:
+        if sdir.is_dir():
+            for shard_candidate in sdir.rglob("*.gw*.jsonl"):
+                _register_shard(shard_candidate)
+
+    results: list[dict[str, Any]] = []
+    for target_path, shard_set in sorted(targets_to_shards.items(), key=lambda x: str(x[0])):
+        if not shard_set:
+            continue
+        sorted_shards = sorted(shard_set, key=lambda s: str(s))
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        res = merge_cassettes(sorted_shards, target_path, deduplicate=False)
+        for s in sorted_shards:
+            with contextlib.suppress(OSError):
+                s.unlink(missing_ok=True)
+        results.append(res)
+
+    return results
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Merge worker cassette shards on pytest-xdist controller after test execution."""
+    if os.environ.get("PYTEST_XDIST_WORKER") or hasattr(session.config, "workerinput"):
+        return
+    merge_worker_shards(session=session)
