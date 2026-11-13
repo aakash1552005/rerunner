@@ -185,7 +185,7 @@ def merge_worker_shards(
     # 1. Search near cassettes of collected items in session
     if session is not None:
         for item in getattr(session, "items", []):
-            try:
+            with contextlib.suppress(Exception):
                 base_path_str = _resolve_cassette_path_for_item(item)
                 base_path = Path(base_path_str).resolve()
                 parent_dir = base_path.parent
@@ -194,8 +194,6 @@ def merge_worker_shards(
                         _register_shard(candidate)
                     for candidate in parent_dir.glob(f"{base_path.stem}_gw*.jsonl"):
                         _register_shard(candidate)
-            except Exception:
-                continue
 
     # 2. Search root_dir or common cassette directories
     search_dirs: list[Path] = []
