@@ -134,6 +134,12 @@ Every AI agent test run in CI consumes live network round-trips and expensive mo
 
 > Measured on Python 3.12 across 10 sequential agent reasoning steps. Run locally with `uv run python benchmarks/bench_replay_latency.py`.
 
+To also save the report generator's latency, token savings, and per-format compression metrics as JSON:
+
+```bash
+python benchmarks/generate_report.py --json bench.json
+```
+
 ---
 
 ## 📚 Runnable Cookbooks & Examples

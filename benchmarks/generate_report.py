@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -334,6 +335,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=20, help="Number of turns for latency bench.")
     parser.add_argument("--step-ms", type=float, default=150.0, help="Simulated RTT ms per turn.")
     parser.add_argument("--turns", type=int, default=200, help="Number of turns for compression.")
+    parser.add_argument(
+        "--json", type=Path, metavar="PATH", help="Also write benchmark metrics as JSON."
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -343,6 +347,13 @@ def main() -> None:
         simulated_step_ms=args.step_ms,
         compression_turns=args.turns,
     )
+    if args.json is not None:
+        report = {
+            "latency": asdict(latency),
+            "compression": [asdict(row) for row in compression],
+        }
+        args.json.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
     print(
         f"Generated benchmarks: {latency.speedup:.1f}x speedup "
         f"({latency.live_total_s:.2f}s -> {latency.replay_total_s:.3f}s), "
