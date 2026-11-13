@@ -699,6 +699,8 @@ def cost(
     total_tokens = 0
     prompt_tokens = 0
     completion_tokens = 0
+    cache_creation_tokens = 0
+    cache_read_tokens = 0
     total_latency_ms = 0.0
     estimated_cost_usd = 0.0
     by_model: dict[str, dict[str, Any]] = {}
@@ -713,15 +715,21 @@ def cost(
                     t_info = _extract_detailed_tokens_from_body(entry.response.body)
                     req_body = entry.request.body if entry.request else ""
                     model_name = extract_model_from_bodies(req_body, entry.response.body)
-                    if t_info["total"]:
+                    cache_creation = t_info.get("cache_creation_input_tokens", 0)
+                    cache_read = t_info.get("cache_read_input_tokens", 0)
+                    if t_info["total"] or cache_creation or cache_read:
                         total_tokens += t_info["total"]
                         prompt_tokens += t_info["prompt"]
                         completion_tokens += t_info["completion"]
+                        cache_creation_tokens += cache_creation
+                        cache_read_tokens += cache_read
                         step_cost = estimate_entry_cost_usd(
                             t_info["prompt"],
                             t_info["completion"],
                             t_info["total"],
                             model=model_name,
+                            cache_creation_input_tokens=cache_creation,
+                            cache_read_input_tokens=cache_read,
                         )
                         estimated_cost_usd += step_cost
                         model_key = model_name or "unknown"
@@ -756,6 +764,8 @@ def cost(
             "total_tokens": total_tokens,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "cache_creation_input_tokens": cache_creation_tokens,
+            "cache_read_input_tokens": cache_read_tokens,
             "estimated_cost_usd": round(estimated_cost_usd, 4),
             "estimated_latency_saved_seconds": round(latency_sec, 2),
             "by_model": by_model,
