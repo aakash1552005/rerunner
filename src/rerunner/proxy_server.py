@@ -48,6 +48,7 @@ class ProxyReplayConfig:
         matching_strategy: MatchingStrategy = "strict",
         simulate_latency: bool = False,
         verify_integrity: bool = False,
+        cors_origin: str | None = None,
     ) -> None:
         if mode not in ("replay", "record", "auto"):
             raise ValueError("mode must be one of: replay, record, auto")
@@ -57,6 +58,7 @@ class ProxyReplayConfig:
         self.upstream_url = upstream_url.rstrip("/") if upstream_url else None
         self.matching_strategy = matching_strategy
         self.simulate_latency = simulate_latency
+        self.cors_origin = cors_origin
         self.lock = threading.Lock()
 
         exists = cassette_exists(cassette_path)
@@ -160,9 +162,20 @@ def _make_handler(config: ProxyReplayConfig) -> type[BaseHTTPRequestHandler]:
                 return b""
             return self.rfile.read(length) if length > 0 else b""
 
+        def _send_cors_headers(self) -> None:
+            if not config.cors_origin:
+                return
+            self.send_header("Access-Control-Allow-Origin", config.cors_origin)
+            self.send_header(
+                "Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            )
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Access-Control-Max-Age", "86400")
+
         def _write_json_error(self, status_code: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status_code)
+            self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -170,6 +183,7 @@ def _make_handler(config: ProxyReplayConfig) -> type[BaseHTTPRequestHandler]:
 
         def _send_recorded_response(self, recorded: RecordedResponse) -> None:
             self.send_response(recorded.status_code)
+            self._send_cors_headers()
             has_ct = False
             for k, v in recorded.headers.items():
                 if k.lower() in HOP_BY_HOP_HEADERS:
@@ -311,6 +325,12 @@ def _make_handler(config: ProxyReplayConfig) -> type[BaseHTTPRequestHandler]:
         def do_DELETE(self) -> None:
             self._dispatch("DELETE")
 
+        def do_OPTIONS(self) -> None:
+            self.send_response(204)
+            self._send_cors_headers()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
     return _RerunnerProxyHandler
 
 
@@ -327,6 +347,7 @@ class RerunnerProxyServer:
         upstream_url: str | None = None,
         matching_strategy: MatchingStrategy = "strict",
         simulate_latency: bool = False,
+        cors_origin: str | None = None,
     ) -> None:
         self.config = ProxyReplayConfig(
             cassette_path,
@@ -334,6 +355,7 @@ class RerunnerProxyServer:
             upstream_url=upstream_url,
             matching_strategy=matching_strategy,
             simulate_latency=simulate_latency,
+            cors_origin=cors_origin,
         )
         self._httpd = ThreadingHTTPServer((host, port), _make_handler(self.config))
         self.host = host
