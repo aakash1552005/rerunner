@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from rerunner.config import config_ignore_fields
 from rerunner.sanitizer import SENSITIVE_QUERY_PARAMS
 
 if TYPE_CHECKING:
@@ -117,6 +118,8 @@ def normalize_body(
         return ""
 
     effective_ignore = get_env_ignore_fields()
+    if not effective_ignore:
+        effective_ignore = config_ignore_fields()
     if ignore_fields is not None:
         effective_ignore.update(str(f).strip() for f in ignore_fields if str(f).strip())
 

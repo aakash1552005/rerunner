@@ -202,7 +202,7 @@ layers = [
     "rerunner.cassette",
     "rerunner.matcher | rerunner.storage",
     "rerunner.integrity",
-    "rerunner.sanitizer | rerunner.models",
+    "rerunner.sanitizer | rerunner.models | rerunner.config",
 ]
 
 [[tool.importlinter.contracts]]
