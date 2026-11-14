@@ -700,6 +700,8 @@ def cost(
     total_tokens = 0
     prompt_tokens = 0
     completion_tokens = 0
+    cache_creation_tokens = 0
+    cache_read_tokens = 0
     total_latency_ms = 0.0
     estimated_cost_usd = 0.0
     by_model: dict[str, dict[str, Any]] = {}
@@ -714,15 +716,21 @@ def cost(
                     t_info = _extract_detailed_tokens_from_body(entry.response.body)
                     req_body = entry.request.body if entry.request else ""
                     model_name = extract_model_from_bodies(req_body, entry.response.body)
-                    if t_info["total"]:
+                    cache_creation = t_info.get("cache_creation_input_tokens", 0)
+                    cache_read = t_info.get("cache_read_input_tokens", 0)
+                    if t_info["total"] or cache_creation or cache_read:
                         total_tokens += t_info["total"]
                         prompt_tokens += t_info["prompt"]
                         completion_tokens += t_info["completion"]
+                        cache_creation_tokens += cache_creation
+                        cache_read_tokens += cache_read
                         step_cost = estimate_entry_cost_usd(
                             t_info["prompt"],
                             t_info["completion"],
                             t_info["total"],
                             model=model_name,
+                            cache_creation_input_tokens=cache_creation,
+                            cache_read_input_tokens=cache_read,
                         )
                         estimated_cost_usd += step_cost
                         model_key = model_name or "unknown"
@@ -757,6 +765,8 @@ def cost(
             "total_tokens": total_tokens,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "cache_creation_input_tokens": cache_creation_tokens,
+            "cache_read_input_tokens": cache_read_tokens,
             "estimated_cost_usd": round(estimated_cost_usd, 4),
             "estimated_latency_saved_seconds": round(latency_sec, 2),
             "by_model": by_model,
@@ -955,10 +965,17 @@ def merge(
         "--deduplicate",
         help="Remove duplicate HTTP/tool steps while preserving first occurrence order.",
     ),
+    verify_all: bool = typer.Option(
+        False,
+        "--verify-all/--no-verify-all",
+        help="Abort with exit code 1 if any input shard fails SHA-256/HMAC integrity verification.",
+    ),
 ) -> None:
     """Merge multiple cassettes into one re-numbered, SHA-256 re-signed cassette."""
     try:
-        result = merge_cassettes(inputs, output_path, deduplicate=deduplicate)
+        result = merge_cassettes(
+            inputs, output_path, deduplicate=deduplicate, verify_all=verify_all
+        )
     except Exception as exc:
         console.print(f"[bold red]Merge failed:[/] {exc}")
         raise typer.Exit(code=1) from exc
@@ -1004,6 +1021,11 @@ def serve(
         "--simulate-latency",
         help="Replay recorded SSE chunk delays in real time.",
     ),
+    cors_origin: str | None = typer.Option(
+        None,
+        "--cors-origin",
+        help="Access-Control-Allow-Origin value for browser agents (e.g. '*' or 'http://localhost:3000'). Disabled by default.",
+    ),
 ) -> None:
     """Start a cross-language HTTP/SSE replay proxy for TypeScript, Go, Rust, or browser agents."""
     if strategy not in ("strict", "content", "fuzzy", "semantic"):
@@ -1019,6 +1041,7 @@ def serve(
             upstream_url=upstream,
             matching_strategy=strategy,  # type: ignore[arg-type]
             simulate_latency=simulate_latency,
+            cors_origin=cors_origin,
         )
     except Exception as exc:
         console.print(f"[bold red]Failed to start proxy server:[/] {exc}")
@@ -1054,7 +1077,7 @@ def setup(
         "claude-project",
         "--clients",
         "-c",
-        help="Comma-separated agent clients (claude-project,claude,cursor,codex,all).",
+        help="Comma-separated agent clients (claude-project,claude,cursor,codex,windsurf,cline,all).",
     ),
     project_dir: Path | None = typer.Option(
         None,
@@ -1084,7 +1107,7 @@ def setup(
         help="Do not create .bak files before modifying existing configs.",
     ),
 ) -> None:
-    """Configure coding-agent MCP integration (Claude Code, Cursor, Codex)."""
+    """Configure coding-agent MCP integration (Claude Code, Cursor, Codex, Windsurf, Cline)."""
     try:
         planned = configure_clients(
             clients,
