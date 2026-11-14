@@ -12,6 +12,7 @@ from rerunner.integrations.base import (
 )
 from rerunner.integrations.bedrock import mock_bedrock_converse_response, wrap_bedrock_client
 from rerunner.integrations.cohere import wrap_cohere, wrap_cohere_client
+from rerunner.integrations.deepseek import wrap_deepseek_client
 from rerunner.integrations.google import wrap_gemini, wrap_google_genai, wrap_vertexai
 from rerunner.integrations.langchain import RerunnerCallbackHandler, wrap_langchain_model
 from rerunner.integrations.langgraph import RerunnerCheckpointer, wrap_langgraph_graph
@@ -39,6 +40,7 @@ __all__ = [
     "wrap_bedrock_client",
     "wrap_cohere",
     "wrap_cohere_client",
+    "wrap_deepseek_client",
     "wrap_gemini",
     "wrap_google_genai",
     "wrap_langchain_model",

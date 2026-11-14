@@ -31,6 +31,7 @@ def test_integrations_public_exports_and_registry_populated() -> None:
         "wrap_gemini",
         "wrap_cohere",
         "wrap_together_client",
+        "wrap_deepseek_client",
         "wrap_bedrock_client",
         "wrap_langchain_model",
         "wrap_langgraph_graph",
@@ -131,3 +132,70 @@ def test_provider_http_conformance_record_replay_and_redaction(
     assert r2.status_code == 200
     assert call_count == 1
     assert json.loads(r2.text)["usage"]["total_tokens"] == 25
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+async def test_deepseek_client_records_and_replays_without_network(
+    tmp_path: Path, asynchronous: bool
+) -> None:
+    openai = pytest.importorskip("openai")
+    from rerunner.integrations import wrap_deepseek_client
+    from rerunner.integrations.deepseek import wrap as wrap_deepseek
+
+    assert wrap_deepseek is wrap_deepseek_client
+    calls: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "deepseek-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek-chat",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hello from DeepSeek"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    cassette_path = tmp_path / "deepseek.jsonl"
+    client_class = openai.AsyncOpenAI if asynchronous else openai.OpenAI
+    for mode in ("record", "replay"):
+        client = client_class(
+            api_key="deepseek-conformance-secret",
+            base_url="https://api.deepseek.com/v1",
+            max_retries=0,
+        )
+        # The shared OpenAI adapter replaces this client; close it before wrapping.
+        if asynchronous:
+            await client._client.aclose()
+        else:
+            client._client.close()
+        assert wrap_deepseek_client(client, cassette_path, mode=mode) is client
+        client._client._transport.real_transport = httpx.MockTransport(respond)
+        try:
+            if asynchronous:
+                response = await client.chat.completions.create(
+                    model="deepseek-chat", messages=[{"role": "user", "content": "hi"}]
+                )
+            else:
+                response = client.chat.completions.create(
+                    model="deepseek-chat", messages=[{"role": "user", "content": "hi"}]
+                )
+            assert response.choices[0].message.content == "Hello from DeepSeek"
+            assert len(calls) == 1
+        finally:
+            if asynchronous:
+                await client.close()
+            else:
+                client.close()
+
+    assert str(calls[0].url) == "https://api.deepseek.com/v1/chat/completions"
+    assert "deepseek-conformance-secret" not in cassette_path.read_text(encoding="utf-8")
+    assert len(Cassette.load(cassette_path, verify_integrity=True).entries) == 1
