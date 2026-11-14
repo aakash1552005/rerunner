@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.3](https://github.com/aakash1552005/rerunner/compare/v0.3.2...v0.3.3) (2026-11-14)
+
+
+### Features
+
+* **cli:** add --verify-all strict integrity check to rerunner merge ([#127](https://github.com/aakash1552005/rerunner/issues/127)) ([b02f31b](https://github.com/aakash1552005/rerunner/commit/b02f31b047cd56538dd74f270c4fe10ccd4c765e))
+* **config:** load default options from [tool.rerunner] in pyproject.toml ([#126](https://github.com/aakash1552005/rerunner/issues/126)) ([7906641](https://github.com/aakash1552005/rerunner/commit/7906641cb47bfa3d2df5f5e445409e5c342746e9))
+* **cost:** support Anthropic prompt-caching token discounts in model pricing (closes [#107](https://github.com/aakash1552005/rerunner/issues/107)) ([#128](https://github.com/aakash1552005/rerunner/issues/128)) ([c17727f](https://github.com/aakash1552005/rerunner/commit/c17727f173f784cd7f0e1f8275990ac8853d618f))
+* **integrations:** add 1-line wrap_together_client wrapper ([#124](https://github.com/aakash1552005/rerunner/issues/124)) ([12e2bb0](https://github.com/aakash1552005/rerunner/commit/12e2bb062e8695c8df610e012a55faa6d2daafd0))
+* **integrations:** add DeepSeek client wrapper ([#121](https://github.com/aakash1552005/rerunner/issues/121)) ([6fc5649](https://github.com/aakash1552005/rerunner/commit/6fc5649701d9c21b59c39a0ac7d57a73e3c9b490))
+* **proxy:** add configurable CORS headers to rerunner serve ([#123](https://github.com/aakash1552005/rerunner/issues/123)) ([be4601d](https://github.com/aakash1552005/rerunner/commit/be4601d03c112ae5ce9a5a9a861827133a7361bd))
+* **pytest:** automatic pytest-xdist worker cassette shard merge hook (closes [#108](https://github.com/aakash1552005/rerunner/issues/108)) ([#129](https://github.com/aakash1552005/rerunner/issues/129)) ([507a73f](https://github.com/aakash1552005/rerunner/commit/507a73f3ad086e8582a2062a6aac1c11eaddbebc))
+* **setup:** add Windsurf and Cline MCP targets to rerunner setup ([#125](https://github.com/aakash1552005/rerunner/issues/125)) ([d846d1d](https://github.com/aakash1552005/rerunner/commit/d846d1d4343034e370a89f41338b8f24d79086ac))
+
+
+### Documentation
+
+* **readme:** update release badge, CLI reference, and pre-commit tag for v0.3.2 ([#119](https://github.com/aakash1552005/rerunner/issues/119)) ([669f73d](https://github.com/aakash1552005/rerunner/commit/669f73db337e42f5bd929f14726a26987adafdc2))
+
 ## [0.3.2](https://github.com/aakash1552005/rerunner/compare/v0.3.1...v0.3.2) (2026-11-12)
 
 
