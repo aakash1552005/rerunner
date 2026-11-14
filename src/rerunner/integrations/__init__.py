@@ -20,6 +20,7 @@ from rerunner.integrations.llamaindex import LlamaIndexRerunnerHandler
 from rerunner.integrations.mcp import RerunnerMCPClient, record_mcp_tool
 from rerunner.integrations.openai import wrap_openai
 from rerunner.integrations.semantic_kernel import wrap_semantic_kernel
+from rerunner.integrations.together import wrap_together_client
 
 __all__ = [
     "BaseProviderAdapter",
@@ -46,5 +47,6 @@ __all__ = [
     "wrap_langgraph_graph",
     "wrap_openai",
     "wrap_semantic_kernel",
+    "wrap_together_client",
     "wrap_vertexai",
 ]

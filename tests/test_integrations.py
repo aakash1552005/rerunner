@@ -26,6 +26,14 @@ def test_wrap_openai(temp_cassette_path: Path) -> None:
     assert hasattr(wrapped._client, "_transport")
 
 
+def test_wrap_together_client(temp_cassette_path: Path) -> None:
+    from rerunner.integrations.together import wrap_together_client
+
+    client = DummyClient()
+    wrapped = wrap_together_client(client, temp_cassette_path, mode="record")
+    assert hasattr(wrapped._client, "_transport")
+
+
 def test_wrap_google_genai(temp_cassette_path: Path) -> None:
     from rerunner.integrations.google import wrap_gemini, wrap_google_genai, wrap_vertexai
 

@@ -30,6 +30,7 @@ def test_integrations_public_exports_and_registry_populated() -> None:
         "wrap_google_genai",
         "wrap_gemini",
         "wrap_cohere",
+        "wrap_together_client",
         "wrap_deepseek_client",
         "wrap_bedrock_client",
         "wrap_langchain_model",
@@ -69,6 +70,14 @@ def test_integrations_public_exports_and_registry_populated() -> None:
             "https://api.cohere.com/v2/chat",
             {"model": "command-a-03-2025", "messages": [{"role": "user", "content": "hi"}]},
             ("authorization", "Bearer cohere-secret-key-1234567890"),
+        ),
+        (
+            "https://api.together.xyz/v1/chat/completions",
+            {
+                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+            ("authorization", "Bearer together-secret-key-1234567890"),
         ),
     ],
 )
