@@ -13,7 +13,14 @@ runner = CliRunner()
 
 
 def test_parse_clients_validation() -> None:
-    assert parse_clients("all") == ["claude-project", "claude", "cursor", "codex"]
+    assert parse_clients("all") == [
+        "claude-project",
+        "claude",
+        "cursor",
+        "codex",
+        "windsurf",
+        "cline",
+    ]
     assert parse_clients("cursor, claude-project, cursor") == ["cursor", "claude-project"]
 
 
@@ -48,6 +55,8 @@ def test_configure_clients_creates_merges_backs_up_and_is_idempotent(tmp_path: P
         "claude": "created",
         "cursor": "created",
         "codex": "updated",
+        "windsurf": "created",
+        "cline": "created",
     }
 
     # Check backup creation on pre-existing files
@@ -68,6 +77,48 @@ def test_configure_clients_creates_merges_backs_up_and_is_idempotent(tmp_path: P
     codex_text = (codex_dir / "config.toml").read_text(encoding="utf-8")
     assert "[mcp_servers.existing]" in codex_text
     assert '[mcp_servers.rerunner]\ncommand = "uvx"\nargs = ["mcp"]' in codex_text
+
+    merged_windsurf = json.loads(
+        (home_dir / ".codeium" / "windsurf" / "mcp_config.json").read_text(encoding="utf-8")
+    )
+    assert merged_windsurf["mcpServers"]["rerunner"] == {"command": "uvx", "args": ["mcp"]}
+
+    cline_path = (
+        home_dir
+        / "AppData"
+        / "Roaming"
+        / "Code"
+        / "User"
+        / "globalStorage"
+        / "saoudrizwan.claude-dev"
+        / "settings"
+        / "cline_mcp_settings.json"
+    )
+    if not cline_path.exists():
+        cline_path = (
+            home_dir
+            / "Library"
+            / "Application Support"
+            / "Code"
+            / "User"
+            / "globalStorage"
+            / "saoudrizwan.claude-dev"
+            / "settings"
+            / "cline_mcp_settings.json"
+        )
+    if not cline_path.exists():
+        cline_path = (
+            home_dir
+            / ".config"
+            / "Code"
+            / "User"
+            / "globalStorage"
+            / "saoudrizwan.claude-dev"
+            / "settings"
+            / "cline_mcp_settings.json"
+        )
+    merged_cline = json.loads(cline_path.read_text(encoding="utf-8"))
+    assert merged_cline["mcpServers"]["rerunner"] == {"command": "uvx", "args": ["mcp"]}
 
     # Re-running is idempotent
     second_run = configure_clients(
@@ -116,3 +167,49 @@ def test_cli_setup_command_dry_run_abort_and_yes(tmp_path: Path) -> None:
     assert yes_res.exit_code == 0
     data = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
     assert data["mcpServers"]["rerunner"] == {"command": "rerunner", "args": ["mcp"]}
+
+
+def test_cli_setup_windsurf_dry_run_previews_target_path(tmp_path: Path) -> None:
+    res = runner.invoke(
+        app,
+        ["setup", "--clients", "windsurf", "--project-dir", str(tmp_path), "--dry-run"],
+    )
+    assert res.exit_code == 0
+    assert "PLANNED" in res.output
+    assert "windsurf" in res.output
+    assert str(Path(".codeium") / "windsurf" / "mcp_config.json") in res.output
+    assert not (tmp_path / ".codeium").exists()
+
+
+def test_configure_clients_windsurf_cline_backup_and_idempotent(tmp_path: Path) -> None:
+    project_dir = tmp_path / "repo"
+    home_dir = tmp_path / "home"
+    project_dir.mkdir()
+    home_dir.mkdir()
+
+    windsurf_path = home_dir / ".codeium" / "windsurf" / "mcp_config.json"
+    windsurf_path.parent.mkdir(parents=True)
+    windsurf_path.write_text(
+        json.dumps({"mcpServers": {"other": {"command": "npx", "args": ["other-mcp"]}}}),
+        encoding="utf-8",
+    )
+
+    actions = configure_clients(
+        "windsurf,cline",
+        project_dir=project_dir,
+        home_dir=home_dir,
+    )
+    statuses = {a.client: a.status for a in actions}
+    assert statuses == {"windsurf": "updated", "cline": "created"}
+    assert Path(f"{windsurf_path}.bak").exists()
+
+    merged = json.loads(windsurf_path.read_text(encoding="utf-8"))
+    assert merged["mcpServers"]["other"] == {"command": "npx", "args": ["other-mcp"]}
+    assert merged["mcpServers"]["rerunner"] == {"command": "rerunner", "args": ["mcp"]}
+
+    second_run = configure_clients(
+        "windsurf,cline",
+        project_dir=project_dir,
+        home_dir=home_dir,
+    )
+    assert all(a.status == "unchanged" for a in second_run)
