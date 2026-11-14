@@ -236,6 +236,58 @@ def test_merge_cassettes_and_cli_deduplicate(tmp_path: Path) -> None:
     assert [e.step for e in loaded_dedup.entries] == [1, 2, 3]
 
 
+def test_merge_verify_all_rejects_corrupted_shard(tmp_path: Path) -> None:
+    c1_path = tmp_path / "part1.jsonl"
+    c2_path = tmp_path / "part2.jsonl"
+
+    c1 = Cassette(c1_path)
+    c1.append_entry(_make_http_entry(1, "gpt-4o", "step one", 10, 5))
+    c1.save()
+
+    c2 = Cassette(c2_path)
+    c2.append_entry(_make_http_entry(1, "gpt-4o", "step two", 20, 10))
+    c2.save()
+
+    lines = c2_path.read_text(encoding="utf-8").splitlines()
+    tampered = json.loads(lines[1])
+    tampered["request"]["body"] = tampered["request"]["body"].replace("step two", "tampered")
+    lines[1] = json.dumps(tampered)
+    c2_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Integrity verification failed"):
+        merge_cassettes([c1_path, c2_path], tmp_path / "merged.jsonl", verify_all=True)
+
+    cli_res = runner.invoke(
+        app,
+        [
+            "merge",
+            str(c1_path),
+            str(c2_path),
+            "--output",
+            str(tmp_path / "m.jsonl"),
+            "--verify-all",
+        ],
+    )
+    assert cli_res.exit_code == 1
+    assert "Integrity verification failed" in cli_res.output
+
+    ok_res = runner.invoke(
+        app,
+        [
+            "merge",
+            str(c1_path),
+            str(c2_path),
+            "--output",
+            str(tmp_path / "m2.jsonl"),
+            "--no-verify-all",
+        ],
+    )
+    assert ok_res.exit_code == 0
+    assert [
+        e.step for e in Cassette.load(tmp_path / "m2.jsonl", verify_integrity=True).entries
+    ] == [1, 2]
+
+
 def test_auto_per_test_cassette_naming() -> None:
     fake_node: Any = SimpleNamespace(
         nodeid="tests/agents/test_checkout.py::TestCart::test_flow[fast]",

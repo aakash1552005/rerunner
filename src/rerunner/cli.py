@@ -964,10 +964,17 @@ def merge(
         "--deduplicate",
         help="Remove duplicate HTTP/tool steps while preserving first occurrence order.",
     ),
+    verify_all: bool = typer.Option(
+        False,
+        "--verify-all/--no-verify-all",
+        help="Abort with exit code 1 if any input shard fails SHA-256/HMAC integrity verification.",
+    ),
 ) -> None:
     """Merge multiple cassettes into one re-numbered, SHA-256 re-signed cassette."""
     try:
-        result = merge_cassettes(inputs, output_path, deduplicate=deduplicate)
+        result = merge_cassettes(
+            inputs, output_path, deduplicate=deduplicate, verify_all=verify_all
+        )
     except Exception as exc:
         console.print(f"[bold red]Merge failed:[/] {exc}")
         raise typer.Exit(code=1) from exc
