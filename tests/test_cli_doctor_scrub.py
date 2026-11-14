@@ -252,3 +252,123 @@ def test_cli_scrub_redacts_values_split_across_stream_chunks(tmp_path: Path) -> 
         "data: [DONE]\n\n",
     ]
     assert response.chunk_delays_ms == [0.0, 1.0, 1.0]
+
+
+def _assert_summary_counts(
+    output: str, total: int, passed: int, failed: int, compromised: int
+) -> None:
+    for label, expected in (
+        ("Total Cassettes", total),
+        ("Passed", passed),
+        ("Failed", failed),
+        ("Compromised", compromised),
+    ):
+        rows = [line for line in output.splitlines() if label in line]
+        assert len(rows) == 1, output
+        assert rows[0].split("│")[-2].strip() == str(expected), output
+
+
+@pytest.mark.parametrize("suffix", [".jsonl", ".gz", ".zst"])
+def test_doctor_summary_clean_formats(tmp_path: Path, suffix: str) -> None:
+    path = tmp_path / ("good" + suffix)
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200, body="ok"),
+        )
+    )
+    cassette.save()
+    result = runner.invoke(app, ["doctor", str(path), "--summary-only"])
+    assert result.exit_code == 0, result.output
+    _assert_summary_counts(result.output, 1, 1, 0, 0)
+    assert "Cassette Audit Summary" in result.output
+    assert "Auditing cassette:" not in result.output
+    assert "Cryptographic integrity" not in result.output
+
+
+def test_doctor_summary_mixed_tampered_missing(tmp_path: Path) -> None:
+    good = tmp_path / "good.jsonl"
+    bad = tmp_path / "bad.jsonl"
+    missing = tmp_path / "missing.jsonl"
+    cassette = Cassette(good)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200, body="before"),
+        )
+    )
+    cassette.save()
+    records = good.read_text().splitlines()
+    entry = json.loads(records[1])
+    entry["response"]["body"] = "after"
+    bad.write_text("\n".join([records[0], json.dumps(entry), ""]))
+    result = runner.invoke(app, ["doctor", "-s", str(good), str(bad), str(missing)])
+    assert result.exit_code == 1, result.output
+    _assert_summary_counts(result.output, 3, 1, 2, 1)
+    assert str(good) not in result.output
+    assert str(bad) not in result.output
+    assert str(missing) not in result.output
+    assert "INTEGRITY FAILURE" not in result.output
+
+
+def test_doctor_summary_sensitive_content(tmp_path: Path) -> None:
+    path = tmp_path / "leaky.jsonl"
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(
+                method="GET", url="https://example.org/?email=alice@example.org"
+            ),
+            response=RecordedResponse(status_code=200),
+        )
+    )
+    cassette.save()
+    result = runner.invoke(app, ["doctor", "--summary-only", str(path)])
+    assert result.exit_code == 1, result.output
+    _assert_summary_counts(result.output, 1, 0, 1, 1)
+    assert "alice@example.org" not in result.output
+    assert "SECURITY WARNING" not in result.output
+
+
+def test_doctor_summary_hmac(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "signed.jsonl"
+    monkeypatch.setenv("RERUNNER_HMAC_KEY", "correct-test-key")
+    cassette = Cassette(path)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            entry_type="http",
+            request=RecordedRequest(method="GET", url="https://example.org/health"),
+            response=RecordedResponse(status_code=200),
+        )
+    )
+    cassette.save()
+    good = runner.invoke(app, ["doctor", str(path), "-s"])
+    assert good.exit_code == 0, good.output
+    _assert_summary_counts(good.output, 1, 1, 0, 0)
+    monkeypatch.setenv("RERUNNER_HMAC_KEY", "incorrect-test-key")
+    bad = runner.invoke(app, ["doctor", str(path), "-s"])
+    assert bad.exit_code == 1, bad.output
+    _assert_summary_counts(bad.output, 1, 0, 1, 1)
+
+
+def test_doctor_summary_preserves_existing_modes(tmp_path: Path) -> None:
+    help_result = runner.invoke(app, ["doctor", "--help"])
+    assert help_result.exit_code == 0, help_result.output
+    assert "--summary-only" in help_result.output
+    default = runner.invoke(app, ["doctor"])
+    flagged = runner.invoke(app, ["doctor", "-s"])
+    assert default.exit_code == flagged.exit_code == 0
+    assert flagged.output == default.output
+    absent = tmp_path / "absent.jsonl"
+    original = runner.invoke(app, ["doctor", str(absent)])
+    assert original.exit_code == 1
+    assert "Auditing cassette:" in original.output
+    assert "Cassette Audit Summary" not in original.output

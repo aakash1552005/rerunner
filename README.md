@@ -543,6 +543,12 @@ We are building a welcoming, world-class community for agent reliability and det
 
 ---
 
+### Condensed cassette audits
+
+Use `rerunner doctor session.jsonl session.jsonl.gz --summary-only` (or `-s`) for aggregate CI output instead of per-cassette detail.
+
+The summary reports **Total Cassettes**, **Passed**, **Failed**, and **Compromised**. Failed includes invalid integrity, detected sensitive data, and missing/unreadable files. Compromised is a subset of Failed: an inspected cassette with invalid integrity or detected secrets/PII; missing/unreadable files are not presumed compromised. Any failure returns exit code 1. With no cassette paths, the original environment diagnostic is displayed, even with `-s`.
+
 ## 📜 License
 
 Rerunner is licensed under the [Apache 2.0 License](LICENSE).

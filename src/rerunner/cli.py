@@ -501,8 +501,42 @@ def doctor(
     cassette_paths: list[Path] | None = typer.Argument(
         None, help="Optional cassette files to audit for integrity and unredacted secrets."
     ),
+    summary_only: bool = typer.Option(
+        False,
+        "--summary-only",
+        "-s",
+        help="Print only aggregate cassette verification results.",
+    ),
 ) -> None:
     """Diagnose the environment, or audit supplied cassettes for integrity and secrets."""
+    if summary_only and cassette_paths:
+        failures = 0
+        compromised = 0
+        for cassette_path in cassette_paths:
+            try:
+                report = verify_cassette_report(cassette_path, strict_security=True)
+            except Exception:
+                failures += 1
+                continue
+
+            if not report["valid"]:
+                failures += 1
+            if not report["integrity_valid"] or not report["security_passed"]:
+                compromised += 1
+
+        summary = Table(title="Cassette Audit Summary")
+        summary.add_column("Metric")
+        summary.add_column("Count", justify="right")
+        summary.add_row("Total Cassettes", str(len(cassette_paths)))
+        summary.add_row("Passed", str(len(cassette_paths) - failures))
+        summary.add_row("Failed", str(failures))
+        summary.add_row("Compromised", str(compromised))
+        console.print(summary)
+
+        if failures:
+            raise typer.Exit(code=1)
+        return
+
     if cassette_paths:
         failures = 0
         for cassette_path in cassette_paths:
