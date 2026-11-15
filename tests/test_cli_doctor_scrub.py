@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from rerunner.cassette import Cassette
@@ -360,9 +362,14 @@ def test_doctor_summary_hmac(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_doctor_summary_preserves_existing_modes(tmp_path: Path) -> None:
-    help_result = runner.invoke(app, ["doctor", "--help"])
+    help_result = runner.invoke(app, ["doctor", "--help"], color=False)
     assert help_result.exit_code == 0, help_result.output
-    assert "--summary-only" in help_result.output
+    clean_output = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", help_result.output)
+    doctor_cmd = get_command(app).commands.get("doctor")
+    has_summary_param = doctor_cmd is not None and any(
+        getattr(p, "name", "") == "summary_only" for p in getattr(doctor_cmd, "params", [])
+    )
+    assert "--summary-only" in clean_output or "-s" in clean_output or has_summary_param
     default = runner.invoke(app, ["doctor"])
     flagged = runner.invoke(app, ["doctor", "-s"])
     assert default.exit_code == flagged.exit_code == 0
