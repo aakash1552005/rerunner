@@ -1,6 +1,6 @@
 {
   "name": "rerunner",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Deterministic flight recorder, replay engine, and CI test runner for AI agents.",
   "author": {
     "name": "AAKASH S S",
