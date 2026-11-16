@@ -14,6 +14,7 @@ from rerunner.integrations.bedrock import mock_bedrock_converse_response, wrap_b
 from rerunner.integrations.cohere import wrap_cohere, wrap_cohere_client
 from rerunner.integrations.deepseek import wrap_deepseek_client
 from rerunner.integrations.google import wrap_gemini, wrap_google_genai, wrap_vertexai
+from rerunner.integrations.groq import wrap_groq_client
 from rerunner.integrations.langchain import RerunnerCallbackHandler, wrap_langchain_model
 from rerunner.integrations.langgraph import RerunnerCheckpointer, wrap_langgraph_graph
 from rerunner.integrations.llamaindex import LlamaIndexRerunnerHandler
@@ -43,6 +44,7 @@ __all__ = [
     "wrap_deepseek_client",
     "wrap_gemini",
     "wrap_google_genai",
+    "wrap_groq_client",
     "wrap_langchain_model",
     "wrap_langgraph_graph",
     "wrap_openai",
