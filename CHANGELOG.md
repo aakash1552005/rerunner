@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/aakash1552005/rerunner/compare/v0.3.3...v0.3.4) (2026-11-16)
+
+
+### Features
+
+* Add Groq SDK integration with sync and async replay ([#135](https://github.com/aakash1552005/rerunner/issues/135)) ([0c7b4c5](https://github.com/aakash1552005/rerunner/commit/0c7b4c5e1c7c5bbf6c79d73211143aff88b7448e))
+
 ## [0.3.3](https://github.com/aakash1552005/rerunner/compare/v0.3.2...v0.3.3) (2026-11-15)
 
 
