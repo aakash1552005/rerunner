@@ -179,6 +179,10 @@ module = "tests.*"
 disallow_untyped_defs = false
 check_untyped_defs = false
 
+[tool.mutmut]
+source_paths = ["src/rerunner"]
+only_mutate = ["src/rerunner/integrity.py", "src/rerunner/sanitizer.py"]
+pytest_add_cli_args_test_selection = ["tests/test_integrity.py", "tests/test_sanitizer.py"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --strict-markers"
