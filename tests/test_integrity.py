@@ -148,6 +148,64 @@ def test_verify_cassette_integrity_with_hmac_secret() -> None:
     assert "Tampered entry detected at step 1" in error
 
 
+def test_verify_cassette_integrity_broken_chain_at_later_step() -> None:
+    entry1 = _make_sample_entry(step=1, prev_hash="GENESIS")
+    entry1.entry_hash = compute_entry_hash(entry1, "GENESIS")
+
+    entry2 = _make_sample_entry(step=2, prev_hash=entry1.entry_hash)
+    entry2.entry_hash = compute_entry_hash(entry2, entry1.entry_hash)
+
+    # Step 3 has broken prev_hash
+    entry3 = _make_sample_entry(step=3, prev_hash="CORRUPTED_HASH")
+    entry3.entry_hash = compute_entry_hash(entry3, "CORRUPTED_HASH")
+
+    is_valid, error = verify_cassette_integrity([entry1, entry2, entry3])
+    assert is_valid is False
+    assert error == f"Broken chain at step 3: expected prev_hash '{entry2.entry_hash}', got 'CORRUPTED_HASH'"
+
+
+def test_verify_cassette_integrity_tampered_at_later_step() -> None:
+    entry1 = _make_sample_entry(step=1, prev_hash="GENESIS")
+    entry1.entry_hash = compute_entry_hash(entry1, "GENESIS")
+
+    entry2 = _make_sample_entry(step=2, prev_hash=entry1.entry_hash)
+    entry2.entry_hash = compute_entry_hash(entry2, entry1.entry_hash)
+
+    # Tamper with entry2
+    entry2.response.body = '{"output": "tampered"}'  # type: ignore[union-attr]
+
+    is_valid, error = verify_cassette_integrity([entry1, entry2])
+    assert is_valid is False
+    assert error is not None
+    assert "Tampered entry detected at step 2" in error
+
+
+def test_compute_merkle_root_even_and_large_trees() -> None:
+    # 2 entries (exact pair)
+    e1 = _make_sample_entry(step=1, prev_hash="GENESIS")
+    e1.entry_hash = compute_entry_hash(e1, "GENESIS")
+    e2 = _make_sample_entry(step=2, prev_hash=e1.entry_hash)
+    e2.entry_hash = compute_entry_hash(e2, e1.entry_hash)
+
+    expected_combined = hashlib.sha256(
+        e1.entry_hash.encode("utf-8") + e2.entry_hash.encode("utf-8")
+    ).digest()
+    root_2 = compute_merkle_root([e1, e2])
+    assert root_2 == expected_combined.hex()
+
+    # 4 entries
+    e3 = _make_sample_entry(step=3, prev_hash=e2.entry_hash)
+    e3.entry_hash = compute_entry_hash(e3, e2.entry_hash)
+    e4 = _make_sample_entry(step=4, prev_hash=e3.entry_hash)
+    e4.entry_hash = compute_entry_hash(e4, e3.entry_hash)
+
+    h12 = hashlib.sha256(e1.entry_hash.encode("utf-8") + e2.entry_hash.encode("utf-8")).digest()
+    h34 = hashlib.sha256(e3.entry_hash.encode("utf-8") + e4.entry_hash.encode("utf-8")).digest()
+    expected_root_4 = hashlib.sha256(h12 + h34).digest().hex()
+
+    assert compute_merkle_root([e1, e2, e3, e4]) == expected_root_4
+
+
 def test_compute_merkle_root_empty_entries() -> None:
     assert compute_merkle_root([]) == hashlib.sha256(b"").hexdigest()
 

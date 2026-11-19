@@ -885,3 +885,52 @@ def test_pseudonymizer_additional_card_variations() -> None:
             assert _is_luhn_valid(res)
 
 
+def test_pseudonymizer_different_seeds_produce_different_digests() -> None:
+    p1 = Pseudonymizer(seed="seed-alpha")
+    p2 = Pseudonymizer(seed="seed-beta")
+
+    assert p1.pseudonymize_email("common@acme.org") != p2.pseudonymize_email("common@acme.org")
+    assert p1.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000") != p2.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000")
+    assert p1.pseudonymize_ssn("987-65-4321") != p2.pseudonymize_ssn("987-65-4321")
+    assert p1.pseudonymize_credit_card("4111-1111-1111-1111") != p2.pseudonymize_credit_card("4111-1111-1111-1111")
+
+
+def test_sanitize_headers_keys_always_lowercase_and_custom_patterns() -> None:
+    headers = {
+        "AUTHORIZATION": "Bearer secret123",
+        "X-API-KEY": "key123",
+        "CUSTOM-HEADER": "contains custom_secret_token",
+    }
+    custom = [(re.compile(r"custom_secret_token"), "[REDACTED_CUSTOM]")]
+    cleaned = sanitize_headers(headers, custom_patterns=custom)
+
+    assert set(cleaned.keys()) == {"authorization", "x-api-key", "custom-header"}
+    assert cleaned["authorization"] == "[REDACTED]"
+    assert cleaned["x-api-key"] == "[REDACTED]"
+    assert cleaned["custom-header"] == "contains [REDACTED_CUSTOM]"
+
+
+def test_sanitize_chunks_empty_single_and_multi_split() -> None:
+    assert sanitize_chunks([]) == []
+    assert sanitize_chunks(["plain text chunk"]) == ["plain text chunk"]
+
+    # Split across 4 chunks
+    quad_chunks = ["sk-ant-", "api03-", "1234567890abcdef", "1234567890abcdef"]
+    cleaned = sanitize_chunks(quad_chunks)
+    assert len(cleaned) == 4
+    assert "".join(cleaned) == "[REDACTED_ANTHROPIC_KEY]"
+
+
+def test_is_probable_ip_full_matrix() -> None:
+    assert _is_probable_ip("0.0.0.0") is False
+    assert _is_probable_ip("1.2.3.9") is False
+    assert _is_probable_ip("1.2.3.10") is True
+    assert _is_probable_ip("255.255.255.255") is True
+    assert _is_probable_ip("192.169.1.1") is True
+    assert _is_probable_ip("172.15.1.1") is True
+    assert _is_probable_ip("172.16.1.1") is True
+    assert _is_probable_ip("172.31.1.1") is True
+    assert _is_probable_ip("172.32.1.1") is True
+
+
+
