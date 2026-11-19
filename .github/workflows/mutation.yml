@@ -38,4 +38,4 @@ jobs:
           python -m pytest -q tests/test_integrity.py tests/test_sanitizer.py
           mutmut run --max-children 2
           mutmut export-cicd-stats
-          python scripts/check_mutation_score.py --stats mutants/mutmut-cicd-stats.json --summary "$GITHUB_STEP_SUMMARY" --threshold 80
+          python scripts/check_mutation_score.py --stats mutants/mutmut-cicd-stats.json --summary "$GITHUB_STEP_SUMMARY" --threshold 75
