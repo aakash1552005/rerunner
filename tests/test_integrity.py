@@ -178,6 +178,14 @@ def test_compute_merkle_root_odd_entries_and_fallback_hash() -> None:
     assert root == root2
 
 
+try:
+    import cryptography
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
+
+
+@pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
 def test_ed25519_keypair_and_signatures() -> None:
     priv_pem, pub_pem = generate_ed25519_keypair()
     assert b"BEGIN PRIVATE KEY" in priv_pem
