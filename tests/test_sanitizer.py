@@ -772,3 +772,116 @@ def test_get_env_redact_patterns_formats(monkeypatch: pytest.MonkeyPatch) -> Non
     assert patterns[2][1] == "[DICT_REPL]"
 
 
+def test_sanitize_string_card_and_ip_raw_and_semver() -> None:
+    # Raw 16-digit valid card without delimiters
+    raw_card = "4111111111111111"
+    assert sanitize_string(f"my {raw_card} number") == "my [REDACTED_CREDIT_CARD] number"
+
+    # Raw 16-digit invalid card
+    invalid_raw = "4111111111111112"
+    assert sanitize_string(f"ref {invalid_raw} code") == f"ref {invalid_raw} code"
+
+    # Semver string that matches _IP_REGEX pattern but fails _is_probable_ip
+    semver = "1.2.3.4"
+    assert sanitize_string(f"version {semver}") == f"version {semver}"
+
+    # Probable IP that matches and gets redacted
+    ip_addr = "10.0.0.1"
+    assert sanitize_string(f"host {ip_addr}") == "host [REDACTED_IP_ADDRESS]"
+
+
+def test_sanitize_payload_exceptions_and_primitives() -> None:
+    class FailingModel:
+        def model_dump(self, mode: str = "python") -> dict[str, str]:
+            raise RuntimeError("Dump failed")
+
+    # Broken model_dump falls through without crashing
+    broken = FailingModel()
+    assert sanitize_payload(broken) is broken
+
+    # Tuples, booleans, numbers, None
+    assert sanitize_payload(("alice@domain.com", 123, True, None)) == ("[REDACTED_EMAIL]", 123, True, None)
+    assert sanitize_payload([("bob@domain.com", 456)]) == [("[REDACTED_EMAIL]", 456)]
+
+
+def test_sanitize_body_json_decode_error_fallback() -> None:
+    # Starts with { and ends with }, but has invalid JSON content
+    bad_json_wrapped = "{invalid json content: user@test.org}"
+    cleaned = sanitize_body(bad_json_wrapped)
+    assert "[REDACTED_EMAIL]" in cleaned
+    assert "user@test.org" not in cleaned
+
+
+def test_absorbed_head_detailed_branches() -> None:
+    # Not matching within limit -> -1
+    assert _absorbed_head("abc", "abc", "xyz", 0, 10) == -1
+
+    # Absorbing leading chars
+    # chunk="abc_val", clean="abc_val", target="val", start=0, limit=10 -> head=4
+    assert _absorbed_head("abc_val", "abc_val", "val", 0, 10) == 4
+
+    # Limit smaller than required head -> -1
+    assert _absorbed_head("abc_val", "abc_val", "val", 0, 2) == -1
+
+
+def test_sether_redactor_overlapping_and_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    phonenumbers = types.ModuleType("phonenumbers")
+    phonenumbers.SUPPORTED_REGIONS = ["US"]
+
+    sether = types.ModuleType("sether")
+
+    class MockMatch:
+        def __init__(self, start: int, end: int) -> None:
+            self.start = start
+            self.end = end
+
+    class MockDetector:
+        def __init__(self, matches: list[tuple[int, int]]) -> None:
+            self.matches = matches
+
+        def detect(self, text: str) -> list[MockMatch]:
+            return [MockMatch(s, e) for s, e in self.matches]
+
+    # Detector 1 detects 0..10, Detector 2 detects 5..15 (overlapping), Detector 3 detects 20..25
+    sether.email_detector = MockDetector([(0, 10)])
+    sether.phone_detector = MockDetector([(5, 15)])
+    sether.credit_card_detector = MockDetector([(20, 25)])
+    sether.ssn_detector = MockDetector([])
+    sether.create_multi_region_phone_detector = lambda regions: sether.phone_detector
+
+    monkeypatch.setitem(sys.modules, "phonenumbers", phonenumbers)
+    monkeypatch.setitem(sys.modules, "sether", sether)
+
+    redactor = SetherRedactor(
+        entities=["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD"],
+        phone_regions=["US"],
+    )
+
+    text = "0123456789abcdefghij0123456789"
+    redacted = redactor.redact(text)
+    assert "[REDACTED_EMAIL]" in redacted
+    assert "[REDACTED_CREDIT_CARD]" in redacted
+
+    # When no detector matches anything
+    empty_redactor = SetherRedactor(entities=["US_SSN"])
+    assert empty_redactor.redact("plain text no ssn") == "plain text no ssn"
+
+
+def test_pseudonymizer_additional_card_variations() -> None:
+    p = Pseudonymizer(seed="variation-seed")
+    # Various valid cards to ensure doubled digits > 9 branch (d -= 9) is exercised
+    cards = [
+        "4999-9999-9999-9999",
+        "4888-8888-8888-8888",
+        "4567-8901-2345-6789",
+    ]
+    for c in cards:
+        if _is_luhn_valid(re.sub(r"\D", "", c)):
+            res = p.pseudonymize_credit_card(c)
+            assert res.startswith("400000")
+            assert len(res) == 16
+            assert _is_luhn_valid(res)
+
+
