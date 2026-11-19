@@ -284,3 +284,31 @@ def test_load_ed25519_module_import_error(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ImportError, match="Ed25519 signing requires 'cryptography'"):
         _load_ed25519_module()
+
+
+def test_compute_merkle_root_exact_values() -> None:
+    entries = []
+    prev = "GENESIS"
+    for i in range(1, 6):
+        req = RecordedRequest(method="POST", url="https://api.anthropic.com/v1/messages", request_key=f"key{i}")
+        resp = RecordedResponse(status_code=200, body="ok")
+        e = CassetteEntry(step=i, entry_type="http", request=req, response=resp, prev_hash=prev, timestamp=1000.0 * i)
+        e.entry_hash = compute_entry_hash(e, prev)
+        prev = e.entry_hash
+        entries.append(e)
+    assert compute_merkle_root(entries[:3]) == "7a9aa465324527d8652e7054fcc0dd1804538365befd5f39224b8104be34ccc5"
+    assert compute_merkle_root(entries[:5]) == "2ec8d695e34edd839073bbd86fd0f9604f5eea7840c8d5e92b6adb9d5cb806a4"
+
+
+
+def test_verify_cassette_integrity_expected_count_exact() -> None:
+    entries = [_make_sample_entry(step=1, prev_hash="GENESIS")]
+    entries[0].entry_hash = compute_entry_hash(entries[0], "GENESIS")
+    ok, err = verify_cassette_integrity(entries, expected_count=1)
+    assert ok is True
+    assert err is None
+
+    ok, err = verify_cassette_integrity(entries, expected_count=2)
+    assert ok is False
+    assert err == "Entry count mismatch: expected 2 entries, but found 1"
+

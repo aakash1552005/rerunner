@@ -982,5 +982,102 @@ def test_pseudonymizer_exact_values() -> None:
     assert p.pseudonymize_credit_card("4111-1111-1111-1111") == "4000003543043000"
 
 
+def test_common_prefix_and_suffix_exact() -> None:
+    assert _common_prefix_length("", "abc") == 0
+    assert _common_prefix_length("abc", "") == 0
+    assert _common_prefix_length("abc", "abc") == 3
+    assert _common_prefix_length("abcdef", "abcxyz") == 3
+    assert _common_prefix_length("xbc", "abc") == 0
+
+    assert _common_suffix_length("", "abc") == 0
+    assert _common_suffix_length("abc", "") == 0
+    assert _common_suffix_length("abc", "abc") == 3
+    assert _common_suffix_length("defabc", "xyzabc") == 3
+    assert _common_suffix_length("abx", "abc") == 0
+
+
+def test_absorbed_head_exact() -> None:
+    assert _absorbed_head("hello", "hello", "hello world", 0, 10) == 0
+    assert _absorbed_head("ab_suffix", "ab_suffix", "suffix and more", 0, 10) == 3
+    assert _absorbed_head("abcdef", "uvwxyz", "no match", 0, 5) == -1
+    assert _absorbed_head("abc", "abc", "xyz", 0, 0) == -1
+
+
+def test_sanitize_chunks_comprehensive() -> None:
+    # Identical chunks when joined equals cleaned
+    assert sanitize_chunks(["hello ", "world"]) == ["hello ", "world"]
+
+    # Split OpenAI project key across two chunks
+    res1 = sanitize_chunks(["sk-proj-", "12345678901234567890123456789012"])
+    assert res1 == ["", "[REDACTED_OPENAI_PROJECT_KEY]"]
+
+    # Split OpenAI standard key across 3 chunks
+    res2 = sanitize_chunks(["prefix ", "sk-", "12345678901234567890123456789012", " suffix"])
+    assert res2 == ["prefix ", "", "[REDACTED_OPENAI_KEY]", " suffix"]
+
+    # Split Bearer token across chunks
+    res3 = sanitize_chunks(["Bearer ", "x" * 16, " tail"])
+    assert res3 == ["Bearer ", "[REDACTED_TOKEN]", " tail"]
+
+    # Split Anthropic key
+    res4 = sanitize_chunks(["start: ", "sk-ant-", "a" * 32, " end"])
+    assert res4 == ["start: ", "", "[REDACTED_ANTHROPIC_KEY]", " end"]
+
+
+def test_pseudonymizer_string_and_payload_exact() -> None:
+    p = Pseudonymizer(seed="test-seed")
+    assert p.pseudonymize_string("") == ""
+    assert p.pseudonymize_payload(123) == 123
+    assert p.pseudonymize_payload(None) is None
+    
+    assert p.pseudonymize_credit_card("1234") == "1234"
+    assert p.pseudonymize_credit_card("4111111111111112") == "4111111111111112"
+
+    text = "Call 123-45-6789 or email test@example.com with id 550e8400-e29b-41d4-a716-446655440000"
+    pseudo_text = p.pseudonymize_string(text)
+    assert "123-45-6789" not in pseudo_text
+    assert "test@example.com" not in pseudo_text
+    assert "550e8400-e29b-41d4-a716-446655440000" not in pseudo_text
+    assert "900-" in pseudo_text
+    assert "@example.test" in pseudo_text
+
+    payload = {
+        "user": "test@example.com",
+        "nested": [1, "123-45-6789"],
+        "count": 42
+    }
+    cleaned = p.pseudonymize_payload(payload)
+    assert cleaned["count"] == 42
+    assert "@example.test" in cleaned["user"]
+    assert cleaned["nested"][0] == 1
+    assert "900-" in cleaned["nested"][1]
+
+
+def test_find_sensitive_leaks_comprehensive() -> None:
+    assert find_sensitive_leaks({"status": "ok", "count": 1}) == []
+
+    leaks1 = find_sensitive_leaks({"headers": {"Authorization": "Bearer secret123456789012"}})
+    assert any("Authorization" in l for l in leaks1)
+
+    assert find_sensitive_leaks({"headers": {"Authorization": "[REDACTED]"}}) == []
+
+    leaks2 = find_sensitive_leaks({"data": "Card 4111-1111-1111-1111 at 192.168.1.1"})
+    assert any("REDACTED_CREDIT_CARD" in l for l in leaks2)
+    assert any("REDACTED_IP_ADDRESS" in l for l in leaks2)
+
+    assert find_sensitive_leaks({"data": "[REDACTED_CREDIT_CARD] at [REDACTED_IP_ADDRESS]"}) == []
+
+
+def test_sanitize_url_exact() -> None:
+    assert sanitize_url("") == ""
+    assert sanitize_url("https://example.com/api/v1/users") == "https://example.com/api/v1/users"
+    url = "https://example.com/search?q=test&token=secret123456789012&api_key=AIzaSyA_abcdef1234567890abcdef1234567"
+    sanitized = sanitize_url(url)
+    assert "token=%5BREDACTED%5D" in sanitized or "token=[REDACTED]" in sanitized
+    assert "api_key=%5BREDACTED%5D" in sanitized or "api_key=[REDACTED]" in sanitized
+    assert "q=test" in sanitized
+
+
+
 
 
