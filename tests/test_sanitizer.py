@@ -1078,6 +1078,110 @@ def test_sanitize_url_exact() -> None:
     assert "q=test" in sanitized
 
 
+def test_all_sensitive_headers_individual_exact() -> None:
+    assert sanitize_headers({"authorization": "s"}) == {"authorization": "[REDACTED]"}
+    assert sanitize_headers({"x-api-key": "s"}) == {"x-api-key": "[REDACTED]"}
+    assert sanitize_headers({"api-key": "s"}) == {"api-key": "[REDACTED]"}
+    assert sanitize_headers({"proxy-authorization": "s"}) == {"proxy-authorization": "[REDACTED]"}
+    assert sanitize_headers({"cookie": "s"}) == {"cookie": "[REDACTED]"}
+    assert sanitize_headers({"set-cookie": "s"}) == {"set-cookie": "[REDACTED]"}
+    assert sanitize_headers({"x-auth-token": "s"}) == {"x-auth-token": "[REDACTED]"}
+
+    assert sanitize_headers({"AUTHORIZATION": "s"}) == {"authorization": "[REDACTED]"}
+    assert sanitize_headers({"X-API-KEY": "s"}) == {"x-api-key": "[REDACTED]"}
+    assert sanitize_headers({"API-KEY": "s"}) == {"api-key": "[REDACTED]"}
+    assert sanitize_headers({"PROXY-AUTHORIZATION": "s"}) == {"proxy-authorization": "[REDACTED]"}
+    assert sanitize_headers({"COOKIE": "s"}) == {"cookie": "[REDACTED]"}
+    assert sanitize_headers({"SET-COOKIE": "s"}) == {"set-cookie": "[REDACTED]"}
+    assert sanitize_headers({"X-AUTH-TOKEN": "s"}) == {"x-auth-token": "[REDACTED]"}
+
+
+def test_all_sensitive_query_params_individual_exact() -> None:
+    assert sanitize_url("https://example.com/?key=val") == "https://example.com/?key=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?api_key=val") == "https://example.com/?api_key=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?apikey=val") == "https://example.com/?apikey=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?token=val") == "https://example.com/?token=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?access_token=val") == "https://example.com/?access_token=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?client_secret=val") == "https://example.com/?client_secret=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?auth=val") == "https://example.com/?auth=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?secret=val") == "https://example.com/?secret=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?password=val") == "https://example.com/?password=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?sig=val") == "https://example.com/?sig=%5BREDACTED%5D"
+    assert sanitize_url("https://example.com/?signature=val") == "https://example.com/?signature=%5BREDACTED%5D"
+
+
+def test_all_phone_number_formats_exact() -> None:
+    assert sanitize_string("+1-555-123-4567") == "+[REDACTED_PHONE]"
+    assert sanitize_string("1-555-123-4567") == "[REDACTED_PHONE]"
+    assert sanitize_string("1.555.123.4567") == "[REDACTED_PHONE]"
+    assert sanitize_string("(555) 123-4567") == "([REDACTED_PHONE]"
+    assert sanitize_string("555-123-4567") == "[REDACTED_PHONE]"
+    assert sanitize_string("555.123.4567") == "[REDACTED_PHONE]"
+    assert sanitize_string("555 123 4567") == "[REDACTED_PHONE]"
+
+
+
+
+def test_key_collision_and_reserved_exact() -> None:
+    data = {
+        "alice@example.com": 1,
+        "bob@example.com": 2,
+        "[REDACTED_EMAIL]#2": 3,
+        "charlie@example.com": 4,
+    }
+    res = sanitize_payload(data)
+    assert res == {
+        "[REDACTED_EMAIL]": 1,
+        "[REDACTED_EMAIL]#3": 2,
+        "[REDACTED_EMAIL]#2": 3,
+        "[REDACTED_EMAIL]#4": 4,
+    }
+
+
+def test_version_key_bypass_exact() -> None:
+    assert sanitize_payload({"version": "10.0.0.1"}) == {"version": "10.0.0.1"}
+    assert sanitize_payload({"semver": "10.0.0.1"}) == {"semver": "10.0.0.1"}
+    assert sanitize_payload({"pyversion": "10.0.0.1"}) == {"pyversion": "10.0.0.1"}
+    assert sanitize_payload({"sdk_version": "10.0.0.1"}) == {"sdk_version": "10.0.0.1"}
+    assert sanitize_payload({"other": "10.0.0.1"}) == {"other": "[REDACTED_IP_ADDRESS]"}
+
+
+def test_get_env_redact_patterns_exact_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RERUNNER_REDACT_PATTERNS", raising=False)
+    assert get_env_redact_patterns() == []
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", "   ")
+    assert get_env_redact_patterns() == []
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", "not-json")
+    assert get_env_redact_patterns() == []
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '{"not": "a list"}')
+    assert get_env_redact_patterns() == []
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '["valid_pat", "invalid[re"]')
+    pats1 = get_env_redact_patterns()
+    assert len(pats1) == 1
+    assert pats1[0][0].pattern == "valid_pat"
+    assert pats1[0][1] == "[REDACTED]"
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '[["tuple_pat", "custom_repl"], ["bad_len"]]')
+    pats2 = get_env_redact_patterns()
+    assert len(pats2) == 1
+    assert pats2[0][0].pattern == "tuple_pat"
+    assert pats2[0][1] == "custom_repl"
+
+    monkeypatch.setenv(
+        "RERUNNER_REDACT_PATTERNS",
+        '[{"pattern": "dict_pat", "replacement": "custom_repl2"}, {"pattern": "default_repl"}]',
+    )
+    pats3 = get_env_redact_patterns()
+    assert len(pats3) == 2
+    assert pats3[0][1] == "custom_repl2"
+    assert pats3[1][1] == "[REDACTED]"
+
+
+
 
 
 
