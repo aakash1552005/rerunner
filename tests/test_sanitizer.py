@@ -500,6 +500,7 @@ def test_sanitize_pii_fallback_and_empty() -> None:
 
 def test_sanitize_pii_with_mocked_presidio(monkeypatch: pytest.MonkeyPatch) -> None:
     import types
+
     presidio_analyzer = types.ModuleType("presidio_analyzer")
     presidio_anonymizer = types.ModuleType("presidio_anonymizer")
     entities_mod = types.ModuleType("presidio_anonymizer.entities")
@@ -518,7 +519,9 @@ def test_sanitize_pii_with_mocked_presidio(monkeypatch: pytest.MonkeyPatch) -> N
             return ["mock_match"]
 
     class MockAnonymizerEngine:
-        def anonymize(self, text: str, analyzer_results: list[str], operators: dict[str, object]) -> MockAnonymized:
+        def anonymize(
+            self, text: str, analyzer_results: list[str], operators: dict[str, object]
+        ) -> MockAnonymized:
             return MockAnonymized("anonymized " + text)
 
     presidio_analyzer.AnalyzerEngine = MockAnalyzerEngine
@@ -753,14 +756,16 @@ def test_get_env_redact_patterns_formats(monkeypatch: pytest.MonkeyPatch) -> Non
     assert get_env_redact_patterns() == []
 
     # 2. String items with invalid regex
-    json_rules = json.dumps([
-        "simple_string",
-        ["tuple_pat", "[TUPLE_REPL]"],
-        {"pattern": "dict_pat", "replacement": "[DICT_REPL]"},
-        "[invalid(regex",  # Should be skipped via re.error
-        ["[another(invalid", "[REPL]"],
-        {"pattern": "[third(invalid", "replacement": "[REPL]"},
-    ])
+    json_rules = json.dumps(
+        [
+            "simple_string",
+            ["tuple_pat", "[TUPLE_REPL]"],
+            {"pattern": "dict_pat", "replacement": "[DICT_REPL]"},
+            "[invalid(regex",  # Should be skipped via re.error
+            ["[another(invalid", "[REPL]"],
+            {"pattern": "[third(invalid", "replacement": "[REPL]"},
+        ]
+    )
     monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", json_rules)
     patterns = get_env_redact_patterns()
     assert len(patterns) == 3
@@ -800,7 +805,12 @@ def test_sanitize_payload_exceptions_and_primitives() -> None:
     assert sanitize_payload(broken) is broken
 
     # Tuples, booleans, numbers, None
-    assert sanitize_payload(("alice@domain.com", 123, True, None)) == ("[REDACTED_EMAIL]", 123, True, None)
+    assert sanitize_payload(("alice@domain.com", 123, True, None)) == (
+        "[REDACTED_EMAIL]",
+        123,
+        True,
+        None,
+    )
     assert sanitize_payload([("bob@domain.com", 456)]) == [("[REDACTED_EMAIL]", 456)]
 
 
@@ -890,9 +900,13 @@ def test_pseudonymizer_different_seeds_produce_different_digests() -> None:
     p2 = Pseudonymizer(seed="seed-beta")
 
     assert p1.pseudonymize_email("common@acme.org") != p2.pseudonymize_email("common@acme.org")
-    assert p1.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000") != p2.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000")
+    assert p1.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000") != p2.pseudonymize_uuid(
+        "550e8400-e29b-41d4-a716-446655440000"
+    )
     assert p1.pseudonymize_ssn("987-65-4321") != p2.pseudonymize_ssn("987-65-4321")
-    assert p1.pseudonymize_credit_card("4111-1111-1111-1111") != p2.pseudonymize_credit_card("4111-1111-1111-1111")
+    assert p1.pseudonymize_credit_card("4111-1111-1111-1111") != p2.pseudonymize_credit_card(
+        "4111-1111-1111-1111"
+    )
 
 
 def test_sanitize_headers_keys_always_lowercase_and_custom_patterns() -> None:
@@ -976,8 +990,14 @@ def test_pseudonymizer_exact_values() -> None:
     p = Pseudonymizer(seed="test-seed")
     assert p.pseudonymize_email("alice@example.com") == "user_09ee5b696e@example.test"
     assert p.pseudonymize_email("ALICE@EXAMPLE.COM") == "user_09ee5b696e@example.test"
-    assert p.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000") == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
-    assert p.pseudonymize_uuid("550E8400-E29B-41D4-A716-446655440000") == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
+    assert (
+        p.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000")
+        == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
+    )
+    assert (
+        p.pseudonymize_uuid("550E8400-E29B-41D4-A716-446655440000")
+        == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
+    )
     assert p.pseudonymize_ssn("123-45-6789") == "900-19-1020"
     assert p.pseudonymize_credit_card("4111-1111-1111-1111") == "4000003543043000"
 
@@ -1029,7 +1049,7 @@ def test_pseudonymizer_string_and_payload_exact() -> None:
     assert p.pseudonymize_string("") == ""
     assert p.pseudonymize_payload(123) == 123
     assert p.pseudonymize_payload(None) is None
-    
+
     assert p.pseudonymize_credit_card("1234") == "1234"
     assert p.pseudonymize_credit_card("4111111111111112") == "4111111111111112"
 
@@ -1044,7 +1064,7 @@ def test_pseudonymizer_string_and_payload_exact() -> None:
     payload = {
         "user": "test@example.com",
         "nested": [1, "123-45-6789"],
-        "count": 42
+        "count": 42,
     }
     cleaned = p.pseudonymize_payload(payload)
     assert cleaned["count"] == 42
@@ -1053,17 +1073,17 @@ def test_pseudonymizer_string_and_payload_exact() -> None:
     assert "900-" in cleaned["nested"][1]
 
 
-def test_find_sensitive_leaks_comprehensive() -> None:
+def test_find_sensitive_leaks_direct_assertions() -> None:
     assert find_sensitive_leaks({"status": "ok", "count": 1}) == []
 
     leaks1 = find_sensitive_leaks({"headers": {"Authorization": "Bearer secret123456789012"}})
-    assert any("Authorization" in l for l in leaks1)
+    assert any("Authorization" in leak for leak in leaks1)
 
     assert find_sensitive_leaks({"headers": {"Authorization": "[REDACTED]"}}) == []
 
     leaks2 = find_sensitive_leaks({"data": "Card 4111-1111-1111-1111 at 192.168.1.1"})
-    assert any("REDACTED_CREDIT_CARD" in l for l in leaks2)
-    assert any("REDACTED_IP_ADDRESS" in l for l in leaks2)
+    assert any("REDACTED_CREDIT_CARD" in leak for leak in leaks2)
+    assert any("REDACTED_IP_ADDRESS" in leak for leak in leaks2)
 
     assert find_sensitive_leaks({"data": "[REDACTED_CREDIT_CARD] at [REDACTED_IP_ADDRESS]"}) == []
 
@@ -1098,16 +1118,42 @@ def test_all_sensitive_headers_individual_exact() -> None:
 
 def test_all_sensitive_query_params_individual_exact() -> None:
     assert sanitize_url("https://example.com/?key=val") == "https://example.com/?key=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?api_key=val") == "https://example.com/?api_key=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?apikey=val") == "https://example.com/?apikey=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?token=val") == "https://example.com/?token=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?access_token=val") == "https://example.com/?access_token=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?client_secret=val") == "https://example.com/?client_secret=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?auth=val") == "https://example.com/?auth=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?secret=val") == "https://example.com/?secret=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?password=val") == "https://example.com/?password=%5BREDACTED%5D"
+    assert (
+        sanitize_url("https://example.com/?api_key=val")
+        == "https://example.com/?api_key=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?apikey=val")
+        == "https://example.com/?apikey=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?token=val")
+        == "https://example.com/?token=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?access_token=val")
+        == "https://example.com/?access_token=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?client_secret=val")
+        == "https://example.com/?client_secret=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?auth=val") == "https://example.com/?auth=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?secret=val")
+        == "https://example.com/?secret=%5BREDACTED%5D"
+    )
+    assert (
+        sanitize_url("https://example.com/?password=val")
+        == "https://example.com/?password=%5BREDACTED%5D"
+    )
     assert sanitize_url("https://example.com/?sig=val") == "https://example.com/?sig=%5BREDACTED%5D"
-    assert sanitize_url("https://example.com/?signature=val") == "https://example.com/?signature=%5BREDACTED%5D"
+    assert (
+        sanitize_url("https://example.com/?signature=val")
+        == "https://example.com/?signature=%5BREDACTED%5D"
+    )
 
 
 def test_all_phone_number_formats_exact() -> None:
@@ -1118,8 +1164,6 @@ def test_all_phone_number_formats_exact() -> None:
     assert sanitize_string("555-123-4567") == "[REDACTED_PHONE]"
     assert sanitize_string("555.123.4567") == "[REDACTED_PHONE]"
     assert sanitize_string("555 123 4567") == "[REDACTED_PHONE]"
-
-
 
 
 def test_key_collision_and_reserved_exact() -> None:
@@ -1179,9 +1223,3 @@ def test_get_env_redact_patterns_exact_branches(monkeypatch: pytest.MonkeyPatch)
     assert len(pats3) == 2
     assert pats3[0][1] == "custom_repl2"
     assert pats3[1][1] == "[REDACTED]"
-
-
-
-
-
-

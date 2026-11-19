@@ -24,7 +24,9 @@ from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
 HAS_CRYPTOGRAPHY = importlib.util.find_spec("cryptography") is not None
 
 
-def _make_sample_entry(step: int = 1, prev_hash: str = "GENESIS", body: str = '{"output": "ok"}') -> CassetteEntry:
+def _make_sample_entry(
+    step: int = 1, prev_hash: str = "GENESIS", body: str = '{"output": "ok"}'
+) -> CassetteEntry:
     req = RecordedRequest(
         method="POST", url="https://api.anthropic.com/v1/messages", request_key=f"key{step}"
     )
@@ -37,9 +39,17 @@ def _make_sample_entry(step: int = 1, prev_hash: str = "GENESIS", body: str = '{
 def test_compute_entry_hash_exact_values() -> None:
     req = RecordedRequest(method="GET", url="https://api.openai.com/v1/models", request_key="k1")
     resp = RecordedResponse(status_code=200, body="ok")
-    e = CassetteEntry(step=1, entry_type="http", request=req, response=resp, prev_hash="GENESIS", timestamp=1000.0)
-    assert compute_entry_hash(e, "GENESIS") == "2729a4fef4281ecb6bccf309176dfb83e95fec7adff93fd7de17e294aff4f1ab"
-    assert compute_entry_hash(e, "GENESIS", secret_key="secret-key") == "a101821bf3475d86bb6172f5457f477fa451f9dabb7318b0f3beb5aa4ed281e1"
+    e = CassetteEntry(
+        step=1, entry_type="http", request=req, response=resp, prev_hash="GENESIS", timestamp=1000.0
+    )
+    assert (
+        compute_entry_hash(e, "GENESIS")
+        == "2729a4fef4281ecb6bccf309176dfb83e95fec7adff93fd7de17e294aff4f1ab"
+    )
+    assert (
+        compute_entry_hash(e, "GENESIS", secret_key="secret-key")
+        == "a101821bf3475d86bb6172f5457f477fa451f9dabb7318b0f3beb5aa4ed281e1"
+    )
 
 
 def test_hash_chain_verification_passes() -> None:
@@ -55,7 +65,9 @@ def test_hash_chain_verification_passes() -> None:
 
 
 def test_tamper_detection_flags_modified_body() -> None:
-    entry1 = _make_sample_entry(step=1, prev_hash="GENESIS", body='{"content": "Original response"}')
+    entry1 = _make_sample_entry(
+        step=1, prev_hash="GENESIS", body='{"content": "Original response"}'
+    )
     entry1.entry_hash = compute_entry_hash(entry1, "GENESIS")
 
     # Attacker tampers with the response body
@@ -92,7 +104,9 @@ def test_compute_entry_hash_hmac_secret_key() -> None:
     canonical = canonical_entry_payload(entry)
     expected_payload = f"GENESIS:{canonical}"
     key = "super-secret-key"
-    expected_hmac = hmac.new(key.encode("utf-8"), expected_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    expected_hmac = hmac.new(
+        key.encode("utf-8"), expected_payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
     # Pass as str
     assert compute_entry_hash(entry, "GENESIS", secret_key=key) == expected_hmac
@@ -105,7 +119,9 @@ def test_compute_entry_hash_env_hmac_key(monkeypatch: pytest.MonkeyPatch) -> Non
     canonical = canonical_entry_payload(entry)
     expected_payload = f"GENESIS:{canonical}"
     monkeypatch.setenv("RERUNNER_HMAC_KEY", "env-secret-key")
-    expected_hmac = hmac.new(b"env-secret-key", expected_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    expected_hmac = hmac.new(
+        b"env-secret-key", expected_payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
     assert compute_entry_hash(entry, "GENESIS") == expected_hmac
 
 
@@ -169,7 +185,10 @@ def test_verify_cassette_integrity_broken_chain_at_later_step() -> None:
 
     is_valid, error = verify_cassette_integrity([entry1, entry2, entry3])
     assert is_valid is False
-    assert error == f"Broken chain at step 3: expected prev_hash '{entry2.entry_hash}', got 'CORRUPTED_HASH'"
+    assert (
+        error
+        == f"Broken chain at step 3: expected prev_hash '{entry2.entry_hash}', got 'CORRUPTED_HASH'"
+    )
 
 
 def test_verify_cassette_integrity_tampered_at_later_step() -> None:
@@ -274,6 +293,7 @@ def test_ed25519_keypair_and_signatures() -> None:
 
 def test_load_ed25519_module_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
     import builtins
+
     orig_import = builtins.__import__
 
     def fake_import(name: str, *args: object, **kwargs: object) -> object:
@@ -290,15 +310,29 @@ def test_compute_merkle_root_exact_values() -> None:
     entries = []
     prev = "GENESIS"
     for i in range(1, 6):
-        req = RecordedRequest(method="POST", url="https://api.anthropic.com/v1/messages", request_key=f"key{i}")
+        req = RecordedRequest(
+            method="POST", url="https://api.anthropic.com/v1/messages", request_key=f"key{i}"
+        )
         resp = RecordedResponse(status_code=200, body="ok")
-        e = CassetteEntry(step=i, entry_type="http", request=req, response=resp, prev_hash=prev, timestamp=1000.0 * i)
+        e = CassetteEntry(
+            step=i,
+            entry_type="http",
+            request=req,
+            response=resp,
+            prev_hash=prev,
+            timestamp=1000.0 * i,
+        )
         e.entry_hash = compute_entry_hash(e, prev)
         prev = e.entry_hash
         entries.append(e)
-    assert compute_merkle_root(entries[:3]) == "7a9aa465324527d8652e7054fcc0dd1804538365befd5f39224b8104be34ccc5"
-    assert compute_merkle_root(entries[:5]) == "2ec8d695e34edd839073bbd86fd0f9604f5eea7840c8d5e92b6adb9d5cb806a4"
-
+    assert (
+        compute_merkle_root(entries[:3])
+        == "7a9aa465324527d8652e7054fcc0dd1804538365befd5f39224b8104be34ccc5"
+    )
+    assert (
+        compute_merkle_root(entries[:5])
+        == "2ec8d695e34edd839073bbd86fd0f9604f5eea7840c8d5e92b6adb9d5cb806a4"
+    )
 
 
 def test_verify_cassette_integrity_expected_count_exact() -> None:
@@ -311,4 +345,3 @@ def test_verify_cassette_integrity_expected_count_exact() -> None:
     ok, err = verify_cassette_integrity(entries, expected_count=2)
     assert ok is False
     assert err == "Entry count mismatch: expected 2 entries, but found 1"
-
