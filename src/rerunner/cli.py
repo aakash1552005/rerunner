@@ -32,7 +32,11 @@ from rerunner.integrity import (
 )
 from rerunner.mcp_server import serve_stdio
 from rerunner.proxy_server import RerunnerProxyServer
-from rerunner.reports import export_cost_html_report, export_trace_html_report
+from rerunner.reports import (
+    export_cost_html_report,
+    export_trace_html_report,
+    generate_savings_markdown,
+)
 from rerunner.setup_wizard import configure_clients
 
 _extract_detailed_tokens_from_body = extract_detailed_tokens_from_body
@@ -703,6 +707,11 @@ def cost(
         "--ci-summary",
         help="Automatically append markdown report to $GITHUB_STEP_SUMMARY if available.",
     ),
+    github_summary: bool = typer.Option(
+        False,
+        "--github-summary",
+        help="Format and append ROI savings report to $GITHUB_STEP_SUMMARY.",
+    ),
     export_html: Path | None = typer.Option(
         None,
         "--export-html",
@@ -824,28 +833,27 @@ def cost(
         )
         console.print(f"[bold green]✔ Standalone HTML savings report exported to:[/] {export_html}")
 
-    if markdown or ci_summary:
-        md = [
-            "### ⚡ Rerunner CI Replay Savings Report",
-            "",
-            "| Metric | Offline Replay | Live API Estimate | Savings / Benefit |",
-            "| :--- | :---: | :---: | :---: |",
-            f"| **Cassette Files Analyzed** | `{len(cassette_files)}` | - | - |",
-            f"| **Total Steps Replayed** | `{total_steps:,}` | `{total_steps:,}` | 100% Deterministic |",
-            f"| **HTTP / Model Calls** | `{total_http:,}` | `{total_http:,}` | Zero network flaky fails |",
-            f"| **External Tool Calls** | `{total_tools:,}` | `{total_tools:,}` | Zero live side effects |",
-            f"| **Tokens Replayed** | `{total_tokens:,}` | `{total_tokens:,}` | **100% Token Savings** |",
-            f"| **Estimated Cost** | **$0.00** | ~${estimated_cost_usd:.4f} | **Saved ~${estimated_cost_usd:.4f}** |",
-            f"| **CI Execution Time** | **< 1s** | ~{latency_sec:.1f}s | **~{latency_sec:.1f}s Faster** |",
-            "",
-            "> *Recorded with cryptographic integrity & PII redaction by [Rerunner](https://github.com/aakash1552005/rerunner)*",
-        ]
-        md_text = "\n".join(md)
-        if markdown:
+    write_ci_summary = ci_summary or github_summary
+    if markdown or write_ci_summary:
+        md_text = generate_savings_markdown(
+            cassette_count=len(cassette_files),
+            total_steps=total_steps,
+            total_http=total_http,
+            total_tools=total_tools,
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+            estimated_cost_usd=estimated_cost_usd,
+            latency_sec=latency_sec,
+            by_model=by_model,
+        )
+        if markdown or (github_summary and not os.environ.get("GITHUB_STEP_SUMMARY")):
             print(md_text)
 
         step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-        if ci_summary and step_summary_path:
+        if write_ci_summary and step_summary_path:
             try:
                 with open(step_summary_path, "a", encoding="utf-8") as f:
                     f.write("\n" + md_text + "\n")
@@ -871,6 +879,51 @@ def cost(
     table.add_row("Latency Saved", f"~{latency_sec:.1f}s", "Accelerates CI test suites")
 
     console.print(table)
+
+
+@app.command()
+def savings(
+    target_path: Path = typer.Argument(
+        Path("tests/cassettes"),
+        help="Path to a cassette file or directory containing cassettes.",
+    ),
+    markdown: bool = typer.Option(
+        False,
+        "--markdown",
+        "-m",
+        help="Output GitHub Flavored Markdown summary suitable for $GITHUB_STEP_SUMMARY.",
+    ),
+    github_summary: bool = typer.Option(
+        False,
+        "--github-summary",
+        help="Format and append ROI savings report to $GITHUB_STEP_SUMMARY.",
+    ),
+    ci_summary: bool = typer.Option(
+        False,
+        "--ci-summary",
+        help="Automatically append markdown report to $GITHUB_STEP_SUMMARY if available.",
+    ),
+    export_html: Path | None = typer.Option(
+        None,
+        "--export-html",
+        help="Destination path to export standalone HTML token & cost savings report.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output machine-readable JSON savings report to stdout.",
+    ),
+) -> None:
+    """Calculate token savings, latency avoided, and ROI dollar cost avoided via replay."""
+    cost(
+        target_path=target_path,
+        markdown=markdown,
+        ci_summary=ci_summary,
+        github_summary=github_summary,
+        export_html=export_html,
+        json_output=json_output,
+    )
 
 
 def _render_flight_deck(

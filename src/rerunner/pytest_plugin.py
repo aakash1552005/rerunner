@@ -36,6 +36,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Override Rerunner session mode for marked tests and fixtures (auto|record|replay|fork)",
     )
+    group.addoption(
+        "--rerunner-summary",
+        action="store_true",
+        default=False,
+        help="Generate and append savings summary to $GITHUB_STEP_SUMMARY after the test run",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -231,7 +237,117 @@ def merge_worker_shards(
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Merge worker cassette shards on pytest-xdist controller after test execution."""
+    """Merge worker cassette shards and optionally generate replay savings summary."""
     if os.environ.get("PYTEST_XDIST_WORKER") or hasattr(session.config, "workerinput"):
         return
     merge_worker_shards(session=session)
+
+    if session.config.getoption("--rerunner-summary", False):
+        try:
+            from rerunner.cassette import Cassette
+            from rerunner.cassette_ops import (
+                estimate_entry_cost_usd,
+                extract_detailed_tokens_from_body,
+                extract_model_from_bodies,
+            )
+            from rerunner.reports import generate_savings_markdown
+
+            cassette_dir = (
+                os.getenv("RERUNNER_CASSETTE_DIR") or config_cassette_dir() or "tests/cassettes"
+            )
+            target_path = Path(cassette_dir)
+            if not target_path.exists():
+                return
+
+            cassette_files: list[Path] = []
+            if target_path.is_file():
+                cassette_files.append(target_path)
+            elif target_path.is_dir():
+                for ext in ("*.zst", "*.gz", "*.jsonl", "*.json"):
+                    cassette_files.extend(target_path.glob(ext))
+                    cassette_files.extend(target_path.glob(f"**/{ext}"))
+                cassette_files = sorted(dict.fromkeys(cassette_files))
+
+            if not cassette_files:
+                return
+
+            total_steps = 0
+            total_http = 0
+            total_tools = 0
+            total_tokens = 0
+            prompt_tokens = 0
+            completion_tokens = 0
+            cache_creation_tokens = 0
+            cache_read_tokens = 0
+            total_latency_ms = 0.0
+            estimated_cost_usd = 0.0
+            by_model: dict[str, dict[str, Any]] = {}
+
+            for path in cassette_files:
+                try:
+                    c = Cassette.load(path, verify_integrity=False)
+                    total_steps += len(c.entries)
+                    for entry in c.entries:
+                        if entry.entry_type == "http" and entry.response:
+                            total_http += 1
+                            t_info = extract_detailed_tokens_from_body(entry.response.body)
+                            req_body = entry.request.body if entry.request else ""
+                            model_name = extract_model_from_bodies(req_body, entry.response.body)
+                            cache_creation = t_info.get("cache_creation_input_tokens", 0)
+                            cache_read = t_info.get("cache_read_input_tokens", 0)
+                            if t_info["total"] or cache_creation or cache_read:
+                                total_tokens += t_info["total"]
+                                prompt_tokens += t_info["prompt"]
+                                completion_tokens += t_info["completion"]
+                                cache_creation_tokens += cache_creation
+                                cache_read_tokens += cache_read
+                                step_cost = estimate_entry_cost_usd(
+                                    t_info["prompt"],
+                                    t_info["completion"],
+                                    t_info["total"],
+                                    model=model_name,
+                                    cache_creation_input_tokens=cache_creation,
+                                    cache_read_input_tokens=cache_read,
+                                )
+                                estimated_cost_usd += step_cost
+                                model_key = model_name or "unknown"
+                                bucket = by_model.setdefault(
+                                    model_key,
+                                    {"calls": 0, "tokens": 0, "estimated_cost_usd": 0.0},
+                                )
+                                bucket["calls"] += 1
+                                bucket["tokens"] += t_info["total"]
+                                bucket["estimated_cost_usd"] = round(
+                                    float(bucket["estimated_cost_usd"]) + step_cost, 6
+                                )
+                            total_latency_ms += (
+                                sum(entry.response.chunk_delays_ms)
+                                if entry.response.chunk_delays_ms
+                                else 1800.0
+                            )
+                        elif entry.entry_type in ("side_effect", "tool"):
+                            total_tools += 1
+                except Exception:
+                    continue
+
+            md_text = generate_savings_markdown(
+                cassette_count=len(cassette_files),
+                total_steps=total_steps,
+                total_http=total_http,
+                total_tools=total_tools,
+                total_tokens=total_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+                estimated_cost_usd=estimated_cost_usd,
+                latency_sec=total_latency_ms / 1000.0,
+                by_model=by_model,
+            )
+
+            step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+            if step_summary_path:
+                with open(step_summary_path, "a", encoding="utf-8") as f:
+                    f.write("\n" + md_text + "\n")
+        except Exception:
+            pass
