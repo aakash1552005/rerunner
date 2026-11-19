@@ -327,7 +327,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                             )
                         elif entry.entry_type in ("side_effect", "tool"):
                             total_tools += 1
-                except Exception:
+                except Exception:  # nosec B112
                     continue
 
             md_text = generate_savings_markdown(
@@ -349,5 +349,5 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             if step_summary_path:
                 with open(step_summary_path, "a", encoding="utf-8") as f:
                     f.write("\n" + md_text + "\n")
-        except Exception:
+        except Exception:  # nosec B110
             pass
