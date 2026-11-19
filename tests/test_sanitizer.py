@@ -933,4 +933,54 @@ def test_is_probable_ip_full_matrix() -> None:
     assert _is_probable_ip("172.32.1.1") is True
 
 
+def test_regex_exact_boundary_lengths() -> None:
+    # Anthropic {32,}
+    assert sanitize_string("sk-ant-" + "a" * 31) == "sk-ant-" + "a" * 31
+    assert sanitize_string("sk-ant-" + "a" * 32) == "[REDACTED_ANTHROPIC_KEY]"
+
+    # OpenAI Project {32,}
+    assert sanitize_string("sk-proj-" + "b" * 31) == "sk-proj-" + "b" * 31
+    assert sanitize_string("sk-proj-" + "b" * 32) == "[REDACTED_OPENAI_PROJECT_KEY]"
+
+    # OpenAI Standard {32,}
+    assert sanitize_string("sk-" + "c" * 31) == "sk-" + "c" * 31
+    assert sanitize_string("sk-" + "c" * 32) == "[REDACTED_OPENAI_KEY]"
+
+    # Google {35}
+    assert sanitize_string("AIza" + "d" * 34) == "AIza" + "d" * 34
+    assert sanitize_string("AIza" + "d" * 35) == "[REDACTED_GOOGLE_API_KEY]"
+
+    # Bearer {16,}
+    assert sanitize_string("Bearer " + "e" * 15) == "Bearer " + "e" * 15
+    assert sanitize_string("Bearer " + "e" * 16) == "Bearer [REDACTED_TOKEN]"
+
+    # GitHub Token {36,}
+    assert sanitize_string("ghp_" + "f" * 35) == "ghp_" + "f" * 35
+    assert sanitize_string("ghp_" + "f" * 36) == "[REDACTED_GITHUB_TOKEN]"
+
+    # GitHub OAuth {36,}
+    assert sanitize_string("gho_" + "g" * 35) == "gho_" + "g" * 35
+    assert sanitize_string("gho_" + "g" * 36) == "[REDACTED_GITHUB_OAUTH_TOKEN]"
+
+    # AWS Key {16}
+    assert sanitize_string("AKIA" + "A" * 15) == "AKIA" + "A" * 15
+    assert sanitize_string("AKIA" + "A" * 16) == "[REDACTED_AWS_KEY_ID]"
+
+    # Slack Token {10,48}
+    assert sanitize_string("xoxb-" + "a" * 9) == "xoxb-" + "a" * 9
+    assert sanitize_string("xoxb-" + "a" * 10) == "[REDACTED_SLACK_TOKEN]"
+    assert sanitize_string("xoxb-" + "a" * 48) == "[REDACTED_SLACK_TOKEN]"
+
+
+def test_pseudonymizer_exact_values() -> None:
+    p = Pseudonymizer(seed="test-seed")
+    assert p.pseudonymize_email("alice@example.com") == "user_09ee5b696e@example.test"
+    assert p.pseudonymize_email("ALICE@EXAMPLE.COM") == "user_09ee5b696e@example.test"
+    assert p.pseudonymize_uuid("550e8400-e29b-41d4-a716-446655440000") == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
+    assert p.pseudonymize_uuid("550E8400-E29B-41D4-A716-446655440000") == "47e87e1b-a9c5-4f51-81fc-470d8b3010af"
+    assert p.pseudonymize_ssn("123-45-6789") == "900-19-1020"
+    assert p.pseudonymize_credit_card("4111-1111-1111-1111") == "4000003543043000"
+
+
+
 

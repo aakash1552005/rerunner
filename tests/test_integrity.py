@@ -34,6 +34,14 @@ def _make_sample_entry(step: int = 1, prev_hash: str = "GENESIS", body: str = '{
     )
 
 
+def test_compute_entry_hash_exact_values() -> None:
+    req = RecordedRequest(method="GET", url="https://api.openai.com/v1/models", request_key="k1")
+    resp = RecordedResponse(status_code=200, body="ok")
+    e = CassetteEntry(step=1, entry_type="http", request=req, response=resp, prev_hash="GENESIS", timestamp=1000.0)
+    assert compute_entry_hash(e, "GENESIS") == "2729a4fef4281ecb6bccf309176dfb83e95fec7adff93fd7de17e294aff4f1ab"
+    assert compute_entry_hash(e, "GENESIS", secret_key="secret-key") == "a101821bf3475d86bb6172f5457f477fa451f9dabb7318b0f3beb5aa4ed281e1"
+
+
 def test_hash_chain_verification_passes() -> None:
     entry1 = _make_sample_entry(step=1, prev_hash="GENESIS")
     entry1.entry_hash = compute_entry_hash(entry1, "GENESIS")
