@@ -85,7 +85,10 @@ def compute_merkle_root(entries: list[CassetteEntry]) -> str:
         (entry.entry_hash or compute_entry_hash(entry, entry.prev_hash)).encode("utf-8")
         for entry in entries
     ]
-    while len(level) > 1:
+    max_depth = len(entries).bit_length() + 2
+    depth = 0
+    while len(level) > 1 and depth < max_depth:
+        depth += 1
         if len(level) % 2 == 1:
             level.append(level[-1])
         next_level: list[bytes] = []

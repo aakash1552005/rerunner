@@ -8,9 +8,17 @@ import subprocess
 import sys
 
 import pytest
+from dataclasses import dataclass
+from pydantic import BaseModel
 
 from rerunner.sanitizer import (
+    Pseudonymizer,
     SetherRedactor,
+    _absorbed_head,
+    _common_prefix_length,
+    _common_suffix_length,
+    _is_luhn_valid,
+    _is_probable_ip,
     find_sensitive_leaks,
     get_env_redact_patterns,
     sanitize_body,
@@ -18,6 +26,7 @@ from rerunner.sanitizer import (
     sanitize_data,
     sanitize_headers,
     sanitize_payload,
+    sanitize_pii,
     sanitize_string,
     sanitize_url,
 )
@@ -409,3 +418,240 @@ def test_sanitize_body_keeps_nested_records_when_keys_collide() -> None:
     assert json.loads(cleaned) == {
         "users": {"[REDACTED_EMAIL]": {"id": 1}, "[REDACTED_EMAIL]#2": {"id": 2}}
     }
+
+
+def test_is_luhn_valid_cases() -> None:
+    assert _is_luhn_valid("4000001234567891") is False
+    assert _is_luhn_valid("4111111111111111") is True
+    assert _is_luhn_valid("12345") is False
+    assert _is_luhn_valid("4111-1111-1111-1111") is True
+    assert _is_luhn_valid("4111-1111-1111-1112") is False
+
+
+def test_is_probable_ip_cases() -> None:
+    assert _is_probable_ip("1.2.3") is False
+    assert _is_probable_ip("1.2.3.4.5") is False
+    assert _is_probable_ip("a.b.c.d") is False
+    assert _is_probable_ip("1.2.c.4") is False
+    assert _is_probable_ip("256.0.0.1") is False
+    assert _is_probable_ip("-1.0.0.1") is False
+    assert _is_probable_ip("10.0.0.1") is True
+    assert _is_probable_ip("127.0.0.1") is True
+    assert _is_probable_ip("192.168.1.1") is True
+    assert _is_probable_ip("172.16.0.1") is True
+    assert _is_probable_ip("172.31.255.255") is True
+    assert _is_probable_ip("8.8.8.10") is True
+    assert _is_probable_ip("1.1.1.1") is False
+
+
+def test_sanitize_payload_pydantic_and_dataclass() -> None:
+    @dataclass
+    class SampleDC:
+        user_email: str
+        count: int
+
+    class SampleModel(BaseModel):
+        token: str
+        active: bool
+
+    dc = SampleDC(user_email="alice@example.com", count=42)
+    cleaned_dc = sanitize_payload(dc)
+    assert cleaned_dc == {"user_email": "[REDACTED_EMAIL]", "count": 42}
+
+    model = SampleModel(token="sk-ant-api03-abcdef1234567890abcdef1234567890", active=True)
+    cleaned_model = sanitize_payload(model)
+    assert cleaned_model == {"token": "[REDACTED_ANTHROPIC_KEY]", "active": True}
+
+
+def test_sanitize_payload_version_keys_bypass_ip_redaction() -> None:
+    data = {
+        "version": "10.0.1.2",
+        "semver": "127.0.0.1",
+        "pyversion": "192.168.1.1",
+        "sdk_version": "172.16.0.1",
+        "server_ip": "10.0.1.2",
+    }
+    cleaned = sanitize_payload(data)
+    assert cleaned["version"] == "10.0.1.2"
+    assert cleaned["semver"] == "127.0.0.1"
+    assert cleaned["pyversion"] == "192.168.1.1"
+    assert cleaned["sdk_version"] == "172.16.0.1"
+    assert cleaned["server_ip"] == "[REDACTED_IP_ADDRESS]"
+
+
+def test_sanitize_body_fallback_on_invalid_json() -> None:
+    invalid_json = "{bad-json: alice@example.com"
+    cleaned = sanitize_body(invalid_json)
+    assert "[REDACTED_EMAIL]" in cleaned
+    assert "alice@example.com" not in cleaned
+    assert sanitize_body(12345) == 12345
+
+
+def test_sanitize_pii_fallback_and_empty() -> None:
+    assert sanitize_pii("") == ""
+    text = "Call me at 555-123-4567 or email bob@example.com"
+    cleaned = sanitize_pii(text)
+    assert "[REDACTED_EMAIL]" in cleaned
+    assert "[REDACTED_PHONE]" in cleaned
+
+
+def test_sanitize_pii_with_mocked_presidio(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+    presidio_analyzer = types.ModuleType("presidio_analyzer")
+    presidio_anonymizer = types.ModuleType("presidio_anonymizer")
+    entities_mod = types.ModuleType("presidio_anonymizer.entities")
+
+    class MockOperatorConfig:
+        def __init__(self, mode: str, params: dict[str, str]) -> None:
+            self.mode = mode
+            self.params = params
+
+    class MockAnonymized:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class MockAnalyzerEngine:
+        def analyze(self, text: str, entities: list[str], language: str) -> list[str]:
+            return ["mock_match"]
+
+    class MockAnonymizerEngine:
+        def anonymize(self, text: str, analyzer_results: list[str], operators: dict[str, object]) -> MockAnonymized:
+            return MockAnonymized("anonymized " + text)
+
+    presidio_analyzer.AnalyzerEngine = MockAnalyzerEngine
+    presidio_anonymizer.AnonymizerEngine = MockAnonymizerEngine
+    entities_mod.OperatorConfig = MockOperatorConfig
+
+    monkeypatch.setitem(sys.modules, "presidio_analyzer", presidio_analyzer)
+    monkeypatch.setitem(sys.modules, "presidio_anonymizer", presidio_anonymizer)
+    monkeypatch.setitem(sys.modules, "presidio_anonymizer.entities", entities_mod)
+
+    res = sanitize_pii("test input", entities=["EMAIL_ADDRESS"])
+    assert "anonymized test input" in res
+
+
+def test_sether_redactor_validation_and_redact(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    phonenumbers = types.ModuleType("phonenumbers")
+    phonenumbers.SUPPORTED_REGIONS = ["US", "GB"]
+
+    sether = types.ModuleType("sether")
+
+    class MockMatch:
+        def __init__(self, start: int, end: int) -> None:
+            self.start = start
+            self.end = end
+
+    class MockDetector:
+        def __init__(self, matches: list[tuple[int, int]]) -> None:
+            self.matches = matches
+
+        def detect(self, text: str) -> list[MockMatch]:
+            return [MockMatch(s, e) for s, e in self.matches]
+
+    sether.email_detector = MockDetector([(0, 17)])  # "alice@example.com"
+    sether.phone_detector = MockDetector([(21, 33)])
+    sether.credit_card_detector = MockDetector([])
+    sether.ssn_detector = MockDetector([])
+    sether.create_multi_region_phone_detector = lambda regions: sether.phone_detector
+
+    monkeypatch.setitem(sys.modules, "phonenumbers", phonenumbers)
+    monkeypatch.setitem(sys.modules, "sether", sether)
+
+    with pytest.raises(ValueError, match="SetherRedactor entities must be a non-empty subset"):
+        SetherRedactor(entities=["INVALID_ENTITY"])
+
+    with pytest.raises(ValueError, match="Unknown phone regions"):
+        SetherRedactor(phone_regions=["XX"])
+
+    redactor = SetherRedactor(entities=["EMAIL_ADDRESS", "PHONE_NUMBER"], phone_regions=["US"])
+    assert redactor.redact("") == ""
+
+    text = "alice@example.com and +15551234567"
+    redacted = redactor.redact(text)
+    assert "[REDACTED_EMAIL]" in redacted
+    assert "[REDACTED_PHONE]" in redacted
+
+
+def test_pseudonymizer_comprehensive(monkeypatch: pytest.MonkeyPatch) -> None:
+    p_default = Pseudonymizer()
+    p_bytes = Pseudonymizer(seed=b"custom-bytes-seed")
+    monkeypatch.setenv("RERUNNER_PSEUDONYM_SEED", "env-seed")
+    p_env = Pseudonymizer()
+    assert p_default._key == b"rerunner-default-seed"
+    assert p_bytes._key == b"custom-bytes-seed"
+    assert p_env._key == b"env-seed"
+
+    p = Pseudonymizer(seed="test-seed")
+
+    email1 = p.pseudonymize_email("Alice@Domain.COM")
+    email2 = p.pseudonymize_email("alice@domain.com")
+    assert email1 == email2
+    assert email1.startswith("user_")
+    assert email1.endswith("@example.test")
+
+    uuid_str = "550e8400-e29b-41d4-a716-446655440000"
+    pseudo_uuid = p.pseudonymize_uuid(uuid_str)
+    assert len(pseudo_uuid) == 36
+    parts = pseudo_uuid.split("-")
+    assert len(parts) == 5
+    assert parts[2].startswith("4")
+    assert parts[3].startswith("8")
+
+    ssn = p.pseudonymize_ssn("123-45-6789")
+    assert ssn.startswith("900-")
+    assert len(ssn) == 11
+
+    valid_cc = "4111-1111-1111-1111"
+    pseudo_cc = p.pseudonymize_credit_card(valid_cc)
+    assert pseudo_cc.startswith("400000")
+    assert len(pseudo_cc) == 16
+    assert _is_luhn_valid(pseudo_cc)
+
+    assert p.pseudonymize_credit_card("1234") == "1234"
+    assert p.pseudonymize_credit_card("4111111111111112") == "4111111111111112"
+
+    text = f"Contact alice@acme.com with {uuid_str} and ssn 123-45-6789 and card {valid_cc}"
+    pseudo_text = p.pseudonymize_string(text)
+    assert "alice@acme.com" not in pseudo_text
+    assert "user_" in pseudo_text
+    assert uuid_str not in pseudo_text
+    assert "900-" in pseudo_text
+    assert "400000" in pseudo_text
+    assert p.pseudonymize_string("") == ""
+
+    payload = {
+        "user": "bob@acme.com",
+        "meta": [uuid_str, 123, True, None],
+        "nested": {"ssn": "123-45-6789"},
+    }
+    masked = p.pseudonymize_payload(payload)
+    assert masked["user"].startswith("user_")
+    assert masked["meta"][0] != uuid_str
+    assert masked["meta"][1] == 123
+    assert masked["meta"][2] is True
+    assert masked["meta"][3] is None
+    assert masked["nested"]["ssn"].startswith("900-")
+    assert p.pseudonymize_payload("direct_string").startswith("direct_string")
+
+
+def test_common_prefix_suffix_and_absorbed_head() -> None:
+    assert _common_prefix_length("abcde", "abcfg") == 3
+    assert _common_prefix_length("abc", "xyz") == 0
+    assert _common_prefix_length("", "abc") == 0
+    assert _common_prefix_length("abc", "abc") == 3
+
+    assert _common_suffix_length("xyzabc", "123abc") == 3
+    assert _common_suffix_length("xyz", "abc") == 0
+    assert _common_suffix_length("", "abc") == 0
+    assert _common_suffix_length("abc", "abc") == 3
+
+    assert _absorbed_head("hello", "hello", "hello world", 0, 10) == 0
+    assert _absorbed_head("token_123", "token_123", "sub_token_123", 4, 10) == 0
+
+
+def test_sanitize_data_alias_identity() -> None:
+    data = {"secret": "sk-ant-api03-abcdef1234567890abcdef1234567890"}
+    assert sanitize_data(data) == sanitize_payload(data)
+
