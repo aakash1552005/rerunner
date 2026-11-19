@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from rerunner.sanitizer import (
+    SECRET_PATTERNS,
+    SENSITIVE_HEADERS,
+    SENSITIVE_QUERY_PARAMS,
     Pseudonymizer,
     SetherRedactor,
     _absorbed_head,
@@ -654,4 +657,118 @@ def test_common_prefix_suffix_and_absorbed_head() -> None:
 def test_sanitize_data_alias_identity() -> None:
     data = {"secret": "sk-ant-api03-abcdef1234567890abcdef1234567890"}
     assert sanitize_data(data) == sanitize_payload(data)
+
+
+def test_every_builtin_secret_pattern_matches_and_redacts() -> None:
+    assert len(SECRET_PATTERNS) >= 9
+    test_cases = [
+        ("sk-ant-api03-" + "a" * 32, "[REDACTED_ANTHROPIC_KEY]"),
+        ("sk-proj-" + "b" * 32, "[REDACTED_OPENAI_PROJECT_KEY]"),
+        ("sk-" + "c" * 32, "[REDACTED_OPENAI_KEY]"),
+        ("AIzaSy" + "d" * 33, "[REDACTED_GOOGLE_API_KEY]"),
+        ("Bearer " + "e" * 20, "Bearer [REDACTED_TOKEN]"),
+        ("ghp_" + "f" * 36, "[REDACTED_GITHUB_TOKEN]"),
+        ("gho_" + "g" * 36, "[REDACTED_GITHUB_OAUTH_TOKEN]"),
+        ("AKIA" + "1234567890ABCDEF", "[REDACTED_AWS_KEY_ID]"),
+        ("xoxb-" + "1234567890123", "[REDACTED_SLACK_TOKEN]"),
+        ("xoxp-" + "1234567890123", "[REDACTED_SLACK_TOKEN]"),
+        ("test.user+tag@sub.domain.org", "[REDACTED_EMAIL]"),
+        ("+1-800-555-0199", "[REDACTED_PHONE]"),
+        ("(800) 555-0199", "[REDACTED_PHONE]"),
+        ("800-555-0199", "[REDACTED_PHONE]"),
+        ("123-45-6789", "[REDACTED_SSN]"),
+    ]
+    for sample, expected_replacement in test_cases:
+        res = sanitize_string(f"prefix {sample} suffix")
+        assert expected_replacement in res, f"Failed for sample: {sample}"
+
+
+def test_every_sensitive_header_redacted() -> None:
+    raw_headers = {h: f"secret-val-for-{h}" for h in SENSITIVE_HEADERS}
+    raw_headers["content-type"] = "application/json"
+    raw_headers["USER-AGENT"] = "rerunner-test/1.0"
+
+    cleaned = sanitize_headers(raw_headers)
+    for h in SENSITIVE_HEADERS:
+        assert cleaned[h] == "[REDACTED]"
+    assert cleaned["content-type"] == "application/json"
+    assert cleaned["user-agent"] == "rerunner-test/1.0"
+
+
+def test_every_sensitive_query_param_redacted() -> None:
+    for param in SENSITIVE_QUERY_PARAMS:
+        url = f"https://api.example.com/v1/search?safe=1&{param}=supersecret&other=val"
+        cleaned = sanitize_url(url)
+        assert f"{param}=%5BREDACTED%5D" in cleaned or f"{param}=[REDACTED]" in cleaned
+        assert "supersecret" not in cleaned
+        assert "safe=1" in cleaned
+
+
+def test_sanitize_url_without_query_and_empty_and_path() -> None:
+    assert sanitize_url("") == ""
+    clean_no_query = sanitize_url("https://example.com/api/v1/users/4111-1111-1111-1111")
+    assert "[REDACTED_CREDIT_CARD]" in clean_no_query
+    assert "4111-1111-1111-1111" not in clean_no_query
+
+    # Query with path and fragment
+    full_url = "https://example.com/api/test.user@domain.com?token=tok123#myfragment"
+    cleaned = sanitize_url(full_url)
+    assert "[REDACTED_EMAIL]" in cleaned
+    assert "token=%5BREDACTED%5D" in cleaned or "token=[REDACTED]" in cleaned
+    assert "myfragment" in cleaned
+
+
+def test_find_sensitive_leaks_comprehensive() -> None:
+    # Clean data returns empty list
+    clean_payload = {
+        "user": "[REDACTED_EMAIL]",
+        "headers": {"authorization": "[REDACTED]"},
+    }
+    assert find_sensitive_leaks(clean_payload) == []
+
+    # Leaking sensitive header
+    leaky_headers = {"authorization": "Bearer unredacted_secret"}
+    leaks = find_sensitive_leaks(leaky_headers)
+    assert any("Unredacted sensitive header 'authorization'" in leak for leak in leaks)
+
+    # Leaking card in string
+    leaks_card = find_sensitive_leaks("Found card 4111 1111 1111 1111 here")
+    assert any("REDACTED_CREDIT_CARD" in leak for leak in leaks_card)
+
+    # Leaking IP in nested list
+    leaks_ip = find_sensitive_leaks([["host", "192.168.1.50"]])
+    assert any("REDACTED_IP_ADDRESS" in leak for leak in leaks_ip)
+
+    # Leaking AWS key in dict
+    leaks_aws = find_sensitive_leaks({"aws": "AKIA1234567890ABCDEF"})
+    assert any("REDACTED_AWS_KEY_ID" in leak for leak in leaks_aws)
+
+
+def test_get_env_redact_patterns_formats(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 1. Invalid JSON or empty
+    monkeypatch.delenv("RERUNNER_REDACT_PATTERNS", raising=False)
+    assert get_env_redact_patterns() == []
+
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", "not-a-json")
+    assert get_env_redact_patterns() == []
+
+    # 2. String items with invalid regex
+    json_rules = json.dumps([
+        "simple_string",
+        ["tuple_pat", "[TUPLE_REPL]"],
+        {"pattern": "dict_pat", "replacement": "[DICT_REPL]"},
+        "[invalid(regex",  # Should be skipped via re.error
+        ["[another(invalid", "[REPL]"],
+        {"pattern": "[third(invalid", "replacement": "[REPL]"},
+    ])
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", json_rules)
+    patterns = get_env_redact_patterns()
+    assert len(patterns) == 3
+    assert patterns[0][0].pattern == "simple_string"
+    assert patterns[0][1] == "[REDACTED]"
+    assert patterns[1][0].pattern == "tuple_pat"
+    assert patterns[1][1] == "[TUPLE_REPL]"
+    assert patterns[2][0].pattern == "dict_pat"
+    assert patterns[2][1] == "[DICT_REPL]"
+
 

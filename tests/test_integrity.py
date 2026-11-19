@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import pytest
 
@@ -19,6 +20,8 @@ from rerunner.integrity import (
     verify_merkle_root_ed25519,
 )
 from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+
+HAS_CRYPTOGRAPHY = importlib.util.find_spec("cryptography") is not None
 
 
 def _make_sample_entry(step: int = 1, prev_hash: str = "GENESIS", body: str = '{"output": "ok"}') -> CassetteEntry:
@@ -176,13 +179,6 @@ def test_compute_merkle_root_odd_entries_and_fallback_hash() -> None:
     # Determinism
     root2 = compute_merkle_root(entries)
     assert root == root2
-
-
-try:
-    import cryptography
-    HAS_CRYPTOGRAPHY = True
-except ImportError:
-    HAS_CRYPTOGRAPHY = False
 
 
 @pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
