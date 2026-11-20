@@ -310,10 +310,12 @@ def sanitize_payload(
         for (k, v), clean_k in zip(data.items(), cleaned_keys, strict=True):
             # Keep every record when two keys sanitize to the same placeholder
             if clean_k in result or (clean_k != k and clean_k in reserved):
-                suffix = 2
-                while f"{clean_k}#{suffix}" in result or f"{clean_k}#{suffix}" in reserved:
-                    suffix += 1
-                clean_k = f"{clean_k}#{suffix}"
+                max_tries = len(data) + len(reserved) + 10
+                for suffix in range(2, max_tries):
+                    candidate = f"{clean_k}#{suffix}"
+                    if candidate not in result and candidate not in reserved:
+                        clean_k = candidate
+                        break
             # If the key is specifically version/semver, do not redact the value as an IP
             if (
                 isinstance(k, str)
@@ -348,7 +350,7 @@ def sanitize_body(
 
     Falls back to string sanitization if the payload is not valid JSON.
     """
-    if not body:
+    if not body or not isinstance(body, str):
         return body
 
     trimmed = body.strip()
@@ -375,18 +377,18 @@ _SETTLE_REACH = 128
 
 def _common_prefix_length(left: str, right: str) -> int:
     limit = min(len(left), len(right))
-    index = 0
-    while index < limit and left[index] == right[index]:
-        index += 1
-    return index
+    for index in range(limit):
+        if left[index] != right[index]:
+            return index
+    return limit
 
 
 def _common_suffix_length(left: str, right: str) -> int:
     limit = min(len(left), len(right))
-    index = 0
-    while index < limit and left[-1 - index] == right[-1 - index]:
-        index += 1
-    return index
+    for index in range(limit):
+        if left[-1 - index] != right[-1 - index]:
+            return index
+    return limit
 
 
 def _absorbed_head(chunk: str, clean: str, target: str, start: int, limit: int) -> int:
