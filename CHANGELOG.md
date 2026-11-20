@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/aakash1552005/rerunner/compare/v0.3.4...v0.3.5) (2026-11-20)
+
+
+### Features
+
+* **ci:** Automated Cost & Latency Savings Reporter for GitHub Actions Summary ([#132](https://github.com/aakash1552005/rerunner/issues/132)) ([#143](https://github.com/aakash1552005/rerunner/issues/143)) ([e79d77e](https://github.com/aakash1552005/rerunner/commit/e79d77e8bc427a8da415d40a4fcdd31bf154a290))
+
 ## [0.3.4](https://github.com/aakash1552005/rerunner/compare/v0.3.3...v0.3.4) (2026-11-16)
 
 
