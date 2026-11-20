@@ -71,3 +71,38 @@ def config_mode(start: Path | str | None = None) -> str | None:
     if isinstance(value, str) and value.strip().lower() in VALID_MODES:
         return value.strip().lower()
     return None
+
+
+def config_pricing(start: Path | str | None = None) -> dict[str, tuple[float, float]]:
+    """Return custom model pricing from ``[tool.rerunner.pricing]`` in ``pyproject.toml``.
+
+    Supports:
+    - Lists/tuples: ``"gpt-4o" = [2.50, 10.00]``
+    - Tables: ``[tool.rerunner.pricing.custom-model] input = 1.5; output = 6.0``
+    """
+    raw_pricing = load_tool_config(start).get("pricing")
+    if not isinstance(raw_pricing, dict):
+        return {}
+
+    rates: dict[str, tuple[float, float]] = {}
+    for model_key, val in raw_pricing.items():
+        if not isinstance(model_key, str) or not model_key.strip():
+            continue
+        norm_key = model_key.lower().strip()
+        if isinstance(val, (list, tuple)) and len(val) >= 2:
+            try:
+                rates[norm_key] = (float(val[0]), float(val[1]))
+            except (ValueError, TypeError):
+                continue
+        elif isinstance(val, dict):
+            in_rate = (
+                val.get("input") or val.get("input_usd_per_1m") or val.get("input_tokens") or 0.0
+            )
+            out_rate = (
+                val.get("output") or val.get("output_usd_per_1m") or val.get("output_tokens") or 0.0
+            )
+            try:
+                rates[norm_key] = (float(in_rate), float(out_rate))
+            except (ValueError, TypeError):
+                continue
+    return rates

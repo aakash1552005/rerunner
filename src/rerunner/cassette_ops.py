@@ -63,11 +63,34 @@ def extract_model_from_bodies(req_body: str, resp_body: str) -> str | None:
     return None
 
 
-def resolve_model_pricing(model: str | None) -> tuple[float, float]:
-    """Return ``(input_usd_per_1M, output_usd_per_1M)`` for ``model`` with prefix matching."""
+def resolve_model_pricing(
+    model: str | None,
+    custom_pricing: dict[str, tuple[float, float]] | None = None,
+) -> tuple[float, float]:
+    """Return ``(input_usd_per_1M, output_usd_per_1M)`` for ``model`` with prefix matching.
+
+    Prioritizes rates configured via ``custom_pricing`` (or ``[tool.rerunner.pricing]`` in pyproject.toml)
+    before falling back to built-in reference rates.
+    """
+    if custom_pricing is None:
+        try:
+            from rerunner.config import config_pricing
+
+            custom_pricing = config_pricing()
+        except Exception:
+            custom_pricing = {}
+
     if not model:
         return DEFAULT_INPUT_OUTPUT_PRICING_USD
     norm = model.lower().strip()
+
+    # 1. Custom rates from pyproject.toml
+    if custom_pricing:
+        for prefix in sorted(custom_pricing.keys(), key=len, reverse=True):
+            if norm == prefix or norm.startswith(f"{prefix}-") or norm.startswith(prefix):
+                return custom_pricing[prefix]
+
+    # 2. Built-in defaults
     for prefix in sorted(MODEL_PRICING_PER_1M_USD.keys(), key=len, reverse=True):
         if norm == prefix or norm.startswith(f"{prefix}-") or norm.startswith(prefix):
             return MODEL_PRICING_PER_1M_USD[prefix]
@@ -81,9 +104,10 @@ def estimate_entry_cost_usd(
     model: str | None = None,
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
+    custom_pricing: dict[str, tuple[float, float]] | None = None,
 ) -> float:
     """Calculate estimated API USD cost for a single recorded step, accounting for prompt caching."""
-    in_rate, out_rate = resolve_model_pricing(model)
+    in_rate, out_rate = resolve_model_pricing(model, custom_pricing=custom_pricing)
     if (
         prompt_tokens > 0
         or completion_tokens > 0
@@ -107,6 +131,7 @@ def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
         "total": 0,
         "cache_creation_input_tokens": 0,
         "cache_read_input_tokens": 0,
+        "reasoning": 0,
     }
     if not body_str:
         return result
@@ -125,6 +150,9 @@ def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
                 cache_read = (
                     usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens") or 0
                 )
+                reasoning = 0
+                if isinstance(usage.get("completion_tokens_details"), dict):
+                    reasoning = usage["completion_tokens_details"].get("reasoning_tokens") or 0
                 total = usage.get("total_tokens")
                 if total is None or not isinstance(total, int):
                     total = int(prompt) + int(comp) + int(cache_creation) + int(cache_read)
@@ -136,6 +164,7 @@ def extract_detailed_tokens_from_body(body_str: str) -> dict[str, int]:
                 result["cache_read_input_tokens"] = (
                     int(cache_read) if isinstance(cache_read, (int, float)) else 0
                 )
+                result["reasoning"] = int(reasoning) if isinstance(reasoning, (int, float)) else 0
                 result["total"] = int(total)
     except (json.JSONDecodeError, TypeError, ValueError, KeyError):
         pass

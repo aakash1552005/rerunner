@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 
 def generate_cost_html_report(
@@ -314,6 +315,82 @@ def export_cost_html_report(
     )
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def generate_savings_markdown(
+    cassette_count: int,
+    total_steps: int,
+    total_http: int,
+    total_tools: int,
+    total_tokens: int,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    estimated_cost_usd: float = 0.0,
+    latency_sec: float = 0.0,
+    by_model: dict[str, dict[str, Any]] | None = None,
+    cache_hit_ratio: float = 100.0,
+) -> str:
+    """Format a high-impact GitHub Step Summary Markdown report for replay ROI."""
+    latency_str = (
+        f"{latency_sec:.1f}s"
+        if latency_sec < 60
+        else f"{latency_sec / 60:.1f}m ({latency_sec:.0f}s)"
+    )
+    md = [
+        "### ⚡ Rerunner CI Replay Savings Report",
+        "",
+        "| Metric | Offline Replay | Live API Estimate | Savings / Benefit |",
+        "| :--- | :---: | :---: | :---: |",
+        f"| **Cassette Files Analyzed** | `{cassette_count}` | - | - |",
+        f"| **Total Steps Replayed** | `{total_steps:,}` | `{total_steps:,}` | 100% Deterministic |",
+        f"| **HTTP / Model Calls** | `{total_http:,}` | `{total_http:,}` | Zero network flaky fails |",
+        f"| **External Tool Calls** | `{total_tools:,}` | `{total_tools:,}` | Zero live side effects |",
+        f"| **Tokens Replayed** | `{total_tokens:,}` | `{total_tokens:,}` | **100% Token Savings** |",
+        f"| **Total Estimated Cost Saved** | **$0.00** | ~${estimated_cost_usd:.4f} | **Saved ~${estimated_cost_usd:.4f}** |",
+        f"| **Wall-Clock Latency Avoided** | **< 1s** | ~{latency_str} | **~{latency_str} Faster in CI** |",
+        f"| **Replay Cache Hit Ratio** | **{cache_hit_ratio:.1f}%** | 0.0% | Instant Zero-Flake Replay |",
+    ]
+    if prompt_tokens or completion_tokens or cache_creation_tokens or cache_read_tokens:
+        md.extend(
+            [
+                "",
+                "<details><summary><b>Token Volume Breakdown</b></summary>",
+                "",
+                "| Token Category | Volume | Description |",
+                "| :--- | :---: | :--- |",
+                f"| Prompt / Input | `{prompt_tokens:,}` | Context & system instructions |",
+                f"| Completion / Output | `{completion_tokens:,}` | Generated model responses |",
+                f"| Cache Creation (Write) | `{cache_creation_tokens:,}` | Context caching initialization |",
+                f"| Cache Read (Hit) | `{cache_read_tokens:,}` | Cached context prompt hits |",
+                "</details>",
+            ]
+        )
+
+    if by_model:
+        md.extend(
+            [
+                "",
+                "#### 📊 Breakdown by Model Family",
+                "",
+                "| Model Family | Replayed Calls | Tokens Saved | Estimated Cost Saved |",
+                "| :--- | :---: | :---: | :---: |",
+            ]
+        )
+        for model_name, info in sorted(by_model.items(), key=lambda x: str(x[0])):
+            calls = info.get("calls", 0)
+            tokens = info.get("tokens", 0)
+            cost = info.get("estimated_cost_usd", 0.0)
+            md.append(f"| `{model_name}` | `{calls:,}` | `{tokens:,}` | ~${cost:.4f} |")
+
+    md.extend(
+        [
+            "",
+            "> *Automated financial ROI & latency savings calculated by [Rerunner](https://github.com/aakash1552005/rerunner)*",
+        ]
+    )
+    return "\n".join(md)
 
 
 def generate_trace_html_report(cassette_path: Path | str) -> str:
