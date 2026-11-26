@@ -15,7 +15,7 @@ import hmac
 import json
 import os
 import re
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 if TYPE_CHECKING:
@@ -173,10 +173,16 @@ def sanitize_string(
     text: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> str:
     """Scan and scrub sensitive API tokens and PII from arbitrary strings."""
     if not text:
         return text
+    if pseudonymizer is not None:
+        if pii_redactor is not None:
+            raise ValueError("pseudonymizer and pii_redactor cannot be combined")
+        return _sanitize_with_pseudonyms(text, pseudonymizer, custom_patterns)
     sanitized = text
 
     # Redact credit card numbers (delimiters or valid Luhn)
@@ -225,6 +231,8 @@ def sanitize_url(
     url: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> str:
     """Sanitize secrets from URL query parameters (e.g. ?key=AIza...) and path components."""
     if not url:
@@ -232,7 +240,12 @@ def sanitize_url(
 
     parts = urlsplit(url)
     if not parts.query:
-        return sanitize_string(url, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+        return sanitize_string(
+            url,
+            custom_patterns=custom_patterns,
+            pii_redactor=pii_redactor,
+            pseudonymizer=pseudonymizer,
+        )
 
     query_params = parse_qsl(parts.query, keep_blank_values=True)
     sanitized_params: list[tuple[str, str]] = []
@@ -243,13 +256,19 @@ def sanitize_url(
             sanitized_params.append((k, "[REDACTED]"))
         else:
             sanitized_val = sanitize_string(
-                v, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                v,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
             sanitized_params.append((k, sanitized_val))
 
     clean_query = urlencode(sanitized_params)
     clean_path = sanitize_string(
-        parts.path, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+        parts.path,
+        custom_patterns=custom_patterns,
+        pii_redactor=pii_redactor,
+        pseudonymizer=pseudonymizer,
     )
 
     return urlunsplit((parts.scheme, parts.netloc, clean_path, clean_query, parts.fragment))
@@ -259,6 +278,8 @@ def sanitize_headers(
     headers: dict[str, str],
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> dict[str, str]:
     """Scrub sensitive HTTP headers before writing to cassette."""
     sanitized: dict[str, str] = {}
@@ -268,7 +289,10 @@ def sanitize_headers(
             sanitized[k_lower] = "[REDACTED]"
         else:
             sanitized[k_lower] = sanitize_string(
-                value, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                value,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
     return sanitized
 
@@ -277,6 +301,8 @@ def sanitize_payload(
     data: Any,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> Any:
     """Recursively sanitize dicts, lists, and strings for safe storage without mutating numbers or booleans."""
     if hasattr(data, "model_dump") and callable(data.model_dump):
@@ -285,21 +311,35 @@ def sanitize_payload(
                 data.model_dump(mode="python"),
                 custom_patterns=custom_patterns,
                 pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
         except Exception:  # nosec B110
             pass
     if dataclasses.is_dataclass(data) and not isinstance(data, type):
         try:
             return sanitize_payload(
-                dataclasses.asdict(data), custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                dataclasses.asdict(data),
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
         except Exception:  # nosec B110
             pass
     if isinstance(data, str):
-        return sanitize_string(data, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+        return sanitize_string(
+            data,
+            custom_patterns=custom_patterns,
+            pii_redactor=pii_redactor,
+            pseudonymizer=pseudonymizer,
+        )
     if isinstance(data, dict):
         cleaned_keys = [
-            sanitize_string(str(k), custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            sanitize_string(
+                str(k),
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
+            )
             if isinstance(k, str)
             else k
             for k in data
@@ -316,6 +356,14 @@ def sanitize_payload(
                     if candidate not in result and candidate not in reserved:
                         clean_k = candidate
                         break
+            # Explicit credential fields must not turn into valid-looking pseudonyms.
+            if (
+                pseudonymizer is not None
+                and isinstance(k, str)
+                and k.lower().strip() in (SENSITIVE_HEADERS | SENSITIVE_QUERY_PARAMS)
+            ):
+                result[clean_k] = "[REDACTED]"
+                continue
             # If the key is specifically version/semver, do not redact the value as an IP
             if (
                 isinstance(k, str)
@@ -325,17 +373,30 @@ def sanitize_payload(
                 result[clean_k] = v
             else:
                 result[clean_k] = sanitize_payload(
-                    v, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                    v,
+                    custom_patterns=custom_patterns,
+                    pii_redactor=pii_redactor,
+                    pseudonymizer=pseudonymizer,
                 )
         return result
     if isinstance(data, list):
         return [
-            sanitize_payload(item, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            sanitize_payload(
+                item,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
+            )
             for item in data
         ]
     if isinstance(data, tuple):
         return tuple(
-            sanitize_payload(item, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+            sanitize_payload(
+                item,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
+            )
             for item in data
         )
     return data
@@ -345,6 +406,8 @@ def sanitize_body(
     body: str,
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> str:
     """Parse JSON bodies to safely redact string values while preserving numbers, booleans, and structure.
 
@@ -360,13 +423,21 @@ def sanitize_body(
         try:
             parsed = json.loads(trimmed)
             sanitized_data = sanitize_payload(
-                parsed, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                parsed,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
             return json.dumps(sanitized_data, ensure_ascii=False)
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    return sanitize_string(body, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+    return sanitize_string(
+        body,
+        custom_patterns=custom_patterns,
+        pii_redactor=pii_redactor,
+        pseudonymizer=pseudonymizer,
+    )
 
 
 # How far settling looks back across a chunk boundary: literal characters kept in front of a
@@ -412,6 +483,8 @@ def sanitize_chunks(
     chunks: list[str],
     custom_patterns: list[tuple[re.Pattern[str], str]] | None = None,
     pii_redactor: PiiRedactor | None = None,
+    *,
+    pseudonymizer: Pseudonymizer | None = None,
 ) -> list[str]:
     """Sanitize streamed chunks so a value split across chunk boundaries is still redacted.
 
@@ -432,11 +505,21 @@ def sanitize_chunks(
     within a small multiple of the stream instead of growing with its square.
     """
     cleaned = [
-        sanitize_string(chunk, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+        sanitize_string(
+            chunk,
+            custom_patterns=custom_patterns,
+            pii_redactor=pii_redactor,
+            pseudonymizer=pseudonymizer,
+        )
         for chunk in chunks
     ]
     joined = "".join(chunks)
-    target = sanitize_string(joined, custom_patterns=custom_patterns, pii_redactor=pii_redactor)
+    target = sanitize_string(
+        joined,
+        custom_patterns=custom_patterns,
+        pii_redactor=pii_redactor,
+        pseudonymizer=pseudonymizer,
+    )
     if "".join(cleaned) == target:
         return cleaned
 
@@ -479,7 +562,10 @@ def sanitize_chunks(
         else:
             window = joined[aligned - context : consumed]
             settled = sanitize_string(
-                window, custom_patterns=custom_patterns, pii_redactor=pii_redactor
+                window,
+                custom_patterns=custom_patterns,
+                pii_redactor=pii_redactor,
+                pseudonymizer=pseudonymizer,
             )
             base = aligned_start - context
             agreed = _common_prefix_length(settled, target[base : base + len(settled)])
@@ -698,7 +784,13 @@ class Pseudonymizer:
     _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
     _CC_RE = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
 
-    def __init__(self, seed: str | bytes | None = None) -> None:
+    def __init__(
+        self,
+        seed: str | bytes | None = None,
+        *,
+        email_domain: Literal["example.test", "example.org"] = "example.test",
+    ) -> None:
+        self._email_domain = email_domain
         raw_seed = seed or os.getenv("RERUNNER_PSEUDONYM_SEED") or "rerunner-default-seed"
         self._key = raw_seed.encode("utf-8") if isinstance(raw_seed, str) else raw_seed
 
@@ -708,7 +800,7 @@ class Pseudonymizer:
     def pseudonymize_email(self, email: str) -> str:
         """Return a deterministic synthetic email address preserving RFC/EmailStr validity."""
         digest = self._digest("email", email.lower())
-        return f"user_{digest[:10]}@example.test"
+        return f"user_{digest[:10]}@{self._email_domain}"
 
     def pseudonymize_uuid(self, value: str) -> str:
         """Return a deterministic valid UUIDv4-formatted identifier."""
@@ -759,6 +851,59 @@ class Pseudonymizer:
         if isinstance(payload, dict):
             return {k: self.pseudonymize_payload(v) for k, v in payload.items()}
         return payload
+
+
+# One pass over the remaining PII prevents generated values from being redacted
+# or pseudonymized a second time by a later overlapping pattern.
+_PII_REPLACEMENTS = {"[REDACTED_EMAIL]", "[REDACTED_SSN]", "[REDACTED_PHONE]"}
+_PHONE_RE = next(pat for pat, repl in SECRET_PATTERNS if repl == "[REDACTED_PHONE]")
+_PSEUDONYM_RE = re.compile(
+    "|".join(
+        f"(?P<{name}>{pattern.pattern})"
+        for name, pattern in (
+            ("email", Pseudonymizer._EMAIL_RE),
+            ("uuid", Pseudonymizer._UUID_RE),
+            ("card", _CARD_REGEX),
+            ("ssn", Pseudonymizer._SSN_RE),
+            ("phone", _PHONE_RE),
+            ("ip", _IP_REGEX),
+        )
+    )
+)
+
+
+def _sanitize_with_pseudonyms(
+    text: str,
+    pseudonymizer: Pseudonymizer,
+    custom_patterns: list[tuple[re.Pattern[str], str]] | None,
+) -> str:
+    """Redact credentials and custom secrets first; preserve supported PII formats."""
+    for pattern, replacement in SECRET_PATTERNS:
+        if replacement not in _PII_REPLACEMENTS:
+            text = pattern.sub(replacement, text)
+    for pattern, replacement in (custom_patterns or []) + get_env_redact_patterns():
+        text = pattern.sub(replacement, text)
+
+    def replace(match: re.Match[str]) -> str:
+        value = match.group(0)
+        kind = match.lastgroup
+        if kind == "email":
+            return pseudonymizer.pseudonymize_email(value)
+        if kind == "uuid":
+            return pseudonymizer.pseudonymize_uuid(value)
+        if kind == "ssn":
+            return pseudonymizer.pseudonymize_ssn(value)
+        if kind == "card":
+            if _is_luhn_valid(re.sub(r"\D", "", value)):
+                return pseudonymizer.pseudonymize_credit_card(value)
+            return "[REDACTED_CREDIT_CARD]" if " " in value or "-" in value else value
+        if kind == "phone":
+            return "[REDACTED_PHONE]"
+        if kind == "ip" and _is_probable_ip(value):
+            return "[REDACTED_IP_ADDRESS]"
+        return value
+
+    return _PSEUDONYM_RE.sub(replace, text)
 
 
 # Alias for backward compatibility with tutorial and generic payload sanitization

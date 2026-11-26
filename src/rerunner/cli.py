@@ -645,6 +645,14 @@ def scrub(
         "-o",
         help="Destination path for scrubbed cassette. If omitted, overwrites in-place.",
     ),
+    pseudonymize: bool = typer.Option(
+        False, "--pseudonymize", help="Preserve supported PII formats using synthetic values."
+    ),
+    seed: str | None = typer.Option(
+        None,
+        "--seed",
+        help="Deterministic test seed; prefer RERUNNER_PSEUDONYM_SEED for private seeds.",
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -657,6 +665,8 @@ def scrub(
             cassette_path,
             output_path=output_path,
             dry_run=dry_run,
+            pseudonymize=pseudonymize,
+            seed=seed,
         )
     except Exception as exc:
         console.print(f"[bold red]Error loading cassette:[/] {exc}")
@@ -677,13 +687,19 @@ def scrub(
         )
         return
 
+    leak_label = "Original Leak Categories" if pseudonymize else "Sensitive Leaks Neutralized"
+    note = (
+        "\n[bold yellow]Synthetic PII may still match strict leak scans; review before sharing.[/]"
+        if pseudonymize
+        else ""
+    )
     console.print(
         Panel(
             f"[bold green]✔ Successfully scrubbed and re-signed cassette![/]\n"
             f"[bold cyan]File:[/] {target}\n"
             f"[bold cyan]Steps Scrubbed & Re-hashed:[/] {report['scrubbed_steps']}\n"
-            f"[bold cyan]Sensitive Leaks Neutralized:[/] {len(initial_leaks)}\n"
-            f"[dim]Cryptographic SHA-256 chain updated from GENESIS.[/]",
+            f"[bold cyan]{leak_label}:[/] {len(initial_leaks)}\n"
+            f"[dim]Cryptographic SHA-256 chain updated from GENESIS.[/]{note}",
             title="🧹 Cassette Scrubbed",
             border_style="green",
         )
