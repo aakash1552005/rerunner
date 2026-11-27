@@ -8,13 +8,13 @@
     "url": "https://github.com/aakash1552005/rerunner",
     "source": "github"
   },
-  "version": "0.3.5",
+  "version": "0.3.6",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "rerunner",
-      "version": "0.3.5",
+      "version": "0.3.6",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

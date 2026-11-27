@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/aakash1552005/rerunner/compare/v0.3.5...v0.3.6) (2026-11-27)
+
+
+### Features
+
+* **cli:** support deterministic cassette pseudonymization ([#98](https://github.com/aakash1552005/rerunner/issues/98)) ([#145](https://github.com/aakash1552005/rerunner/issues/145)) ([12bb9d5](https://github.com/aakash1552005/rerunner/commit/12bb9d57bdde5803c968a963f2acaa2a6a4ac531))
+
 ## [0.3.5](https://github.com/aakash1552005/rerunner/compare/v0.3.4...v0.3.5) (2026-11-20)
 
 
