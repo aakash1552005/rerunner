@@ -56,6 +56,34 @@ def test_sanitize_google_slack_and_cloud_tokens() -> None:
     assert "[REDACTED_SLACK_TOKEN]" in cleaned
 
 
+def test_sanitize_huggingface_and_aws_session_credentials() -> None:
+    hf_token = "hf_" + "a1B2c3D4" * 5
+    aws_session_key_id = "ASIA" + "A1B2C3D4" * 2
+
+    cleaned_text = sanitize_string(f"Hugging Face: {hf_token}; AWS: {aws_session_key_id}")
+    assert hf_token not in cleaned_text
+    assert aws_session_key_id not in cleaned_text
+    assert "[REDACTED_HUGGINGFACE_TOKEN]" in cleaned_text
+    assert "[REDACTED_AWS_SESSION_KEY_ID]" in cleaned_text
+
+    # Use non-sensitive parameter names to exercise value-based detection rather
+    # than the separate blanket redaction for keys such as "token" and "api_key".
+    cleaned_url = sanitize_url(
+        f"https://example.org/connect?model_key={hf_token}&session_ref={aws_session_key_id}"
+    )
+    assert hf_token not in cleaned_url
+    assert aws_session_key_id not in cleaned_url
+    assert "REDACTED_HUGGINGFACE_TOKEN" in cleaned_url
+    assert "REDACTED_AWS_SESSION_KEY_ID" in cleaned_url
+
+    cleaned_headers = sanitize_headers({
+        "x-hf-token": hf_token,
+        "x-aws-session-key-id": aws_session_key_id,
+    })
+    assert cleaned_headers["x-hf-token"] == "[REDACTED_HUGGINGFACE_TOKEN]"
+    assert cleaned_headers["x-aws-session-key-id"] == "[REDACTED_AWS_SESSION_KEY_ID]"
+
+
 def test_sanitize_pii_emails_phones_and_ips() -> None:
     text = "Contact alice.smith@enterprise.org at +1 (555) 234-5678 or 192.168.1.105 with card 4111 2222 3333 4444"
     cleaned = sanitize_string(text)
