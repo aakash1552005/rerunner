@@ -1223,3 +1223,66 @@ def test_get_env_redact_patterns_exact_branches(monkeypatch: pytest.MonkeyPatch)
     assert len(pats3) == 2
     assert pats3[0][1] == "custom_repl2"
     assert pats3[1][1] == "[REDACTED]"
+
+
+def test_pseudonymizer_seed_modes_and_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RERUNNER_PSEUDONYM_SEED", "env-seed-value")
+    p_env = Pseudonymizer(email_domain="example.org")
+    assert p_env.pseudonymize_email("bob@corp.com").endswith("@example.org")
+
+    p_bytes = Pseudonymizer(seed=b"raw-bytes-seed")
+    p_str = Pseudonymizer(seed="raw-bytes-seed")
+    assert p_bytes.pseudonymize_email("bob@corp.com") == p_str.pseudonymize_email("bob@corp.com")
+
+    monkeypatch.delenv("RERUNNER_PSEUDONYM_SEED", raising=False)
+    p_default = Pseudonymizer()
+    assert p_default.pseudonymize_email("bob@corp.com") == Pseudonymizer(
+        seed="rerunner-default-seed"
+    ).pseudonymize_email("bob@corp.com")
+
+
+def test_sanitize_with_pseudonyms_comprehensive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", '["ENV_SECRET_TOKEN"]')
+    p = Pseudonymizer(seed="ci-seed")
+    custom = [(re.compile(r"CUSTOM_\d+"), "[REDACTED_CUSTOM]")]
+
+    # Secret + custom + env + all PII types in one pass
+    raw = (
+        "key=sk-12345678901234567890123456789012 "
+        "custom=CUSTOM_99 "
+        "env=ENV_SECRET_TOKEN "
+        "email=alice@example.com "
+        "uuid=550e8400-e29b-41d4-a716-446655440000 "
+        "ssn=123-45-6789 "
+        "card=4111-1111-1111-1111 "
+        "badcard=4111-1111-1111-1112 "
+        "baddigits=4111111111111112 "
+        "phone=555-123-4567 "
+        "ip=192.168.1.50 "
+        "ver=1.2.3.4"
+    )
+    cleaned = sanitize_string(raw, custom_patterns=custom, pseudonymizer=p)
+    assert "[REDACTED_OPENAI_KEY]" in cleaned
+    assert "[REDACTED_CUSTOM]" in cleaned
+    assert "[REDACTED]" in cleaned
+    assert "alice@example.com" not in cleaned
+    assert "@example.test" in cleaned
+    assert "550e8400-e29b-41d4-a716-446655440000" not in cleaned
+    assert "123-45-6789" not in cleaned
+    assert "900-" in cleaned
+    assert "400000" in cleaned
+    assert "badcard=[REDACTED_CREDIT_CARD]" in cleaned
+    assert "baddigits=4111111111111112" in cleaned
+    assert "phone=[REDACTED_PHONE]" in cleaned
+    assert "ip=[REDACTED_IP_ADDRESS]" in cleaned
+
+    # Nested payload sanitization with pseudonymizer
+    payload = {
+        "alice@example.com": "sk-12345678901234567890123456789012",
+        "items": ["123-45-6789", "550e8400-e29b-41d4-a716-446655440000"],
+        "version": "10.0.0.1",
+    }
+    cleaned_payload = sanitize_payload(payload, pseudonymizer=p)
+    assert "[REDACTED_OPENAI_KEY]" in list(cleaned_payload.values())
+    assert cleaned_payload["version"] == "10.0.0.1"
+    assert "900-" in cleaned_payload["items"][0]
