@@ -470,6 +470,9 @@ rerunner doctor session.jsonl session.jsonl.zst session.jsonl.gz
 # Scrub secrets and re-sign cryptographic SHA-256 hash chains across existing cassettes
 rerunner scrub session.jsonl
 
+# Preserve supported PII formats using deterministic synthetic values
+rerunner scrub session.jsonl --pseudonymize --output synthetic.jsonl
+
 # Launch interactive terminal flight deck to visually inspect multi-turn agent steps
 rerunner tui session.jsonl
 
@@ -508,6 +511,22 @@ rerunner merge shard1.jsonl shard2.jsonl -o combined.jsonl
 rerunner keygen -o .keys
 rerunner sign session.jsonl --private-key .keys/rerunner_ed25519.key
 ```
+
+With `--pseudonymize`, scrub replaces recognized emails, UUIDs, US SSNs and
+Luhn-valid 16-digit card strings with deterministic synthetic values. Emails use
+the reserved documentation domain `example.org` so Pydantic `EmailStr` accepts
+them. Credentials, sensitive headers, query parameters and matching payload keys, plus custom redaction
+patterns still use redaction; unsupported PII continues to use existing
+redaction where detected. The default scrub mode is unchanged.
+
+Use `RERUNNER_PSEUDONYM_SEED` with a private, high-entropy seed for sensitive
+work; `--seed` is useful for synthetic tests but is visible in command history
+and process arguments. Without a seed the existing public default is used.
+Pseudonymization is not anonymization, and the strict leak scanner intentionally
+continues to flag PII-shaped synthetic values. Review the output before sharing.
+The original request matching keys are retained, as in ordinary scrub, so replay
+with the original test requests remains possible; this does not re-key requests
+for a new pseudonymized input corpus. `--dry-run` does not write output.
 
 ### Pre-commit cassette security audit
 

@@ -11,6 +11,7 @@ from rerunner.cassette import Cassette
 from rerunner.integrity import compute_entry_hash, verify_cassette_integrity
 from rerunner.models import CassetteEntry
 from rerunner.sanitizer import (
+    Pseudonymizer,
     find_sensitive_leaks,
     sanitize_chunks,
     sanitize_headers,
@@ -508,13 +509,15 @@ def diff_cassettes_report(cassette_a: Path | str, cassette_b: Path | str) -> dic
     }
 
 
-def _sanitize_json_or_text(raw_body: str) -> str:
+def _sanitize_json_or_text(raw_body: str, *, pseudonymizer: Pseudonymizer | None = None) -> str:
     """Scrub structured JSON payloads when valid JSON, otherwise sanitize plain text."""
     try:
         body_json = json.loads(raw_body)
-        return json.dumps(sanitize_payload(body_json), separators=(",", ":"))
+        return json.dumps(
+            sanitize_payload(body_json, pseudonymizer=pseudonymizer), separators=(",", ":")
+        )
     except Exception:
-        return sanitize_string(raw_body)
+        return sanitize_string(raw_body, pseudonymizer=pseudonymizer)
 
 
 def scrub_cassette_file(
@@ -522,8 +525,13 @@ def scrub_cassette_file(
     *,
     output_path: Path | str | None = None,
     dry_run: bool = False,
+    pseudonymize: bool = False,
+    seed: str | None = None,
 ) -> dict[str, Any]:
-    """Scrub secrets and PII from a cassette, re-signing its SHA-256 chain."""
+    """Scrub secrets and PII, optionally preserving supported PII formats."""
+    if seed is not None and not pseudonymize:
+        raise ValueError("seed requires pseudonymize=True")
+    pseudonymizer = Pseudonymizer(seed, email_domain="example.org") if pseudonymize else None
     cassette = Cassette.load(cassette_path, verify_integrity=False)
     initial_leaks = scan_cassette_leaks(cassette, include_url_and_chunks=True)
 
@@ -532,25 +540,43 @@ def scrub_cassette_file(
 
     for entry in cassette.entries:
         if entry.entry_type == "http" and entry.request and entry.response:
-            entry.request.url = sanitize_url(entry.request.url)
-            entry.request.headers = sanitize_headers(entry.request.headers)
-            entry.request.body = _sanitize_json_or_text(entry.request.body)
+            entry.request.url = sanitize_url(entry.request.url, pseudonymizer=pseudonymizer)
+            entry.request.headers = sanitize_headers(
+                entry.request.headers, pseudonymizer=pseudonymizer
+            )
+            entry.request.body = _sanitize_json_or_text(
+                entry.request.body, pseudonymizer=pseudonymizer
+            )
 
-            entry.response.headers = sanitize_headers(entry.response.headers)
-            entry.response.body = _sanitize_json_or_text(entry.response.body)
+            entry.response.headers = sanitize_headers(
+                entry.response.headers, pseudonymizer=pseudonymizer
+            )
+            entry.response.body = _sanitize_json_or_text(
+                entry.response.body, pseudonymizer=pseudonymizer
+            )
 
             if entry.response.chunks:
-                entry.response.chunks = sanitize_chunks(entry.response.chunks)
+                entry.response.chunks = sanitize_chunks(
+                    entry.response.chunks, pseudonymizer=pseudonymizer
+                )
             scrubbed_count += 1
         elif entry.entry_type in ("side_effect", "tool"):
             if entry.side_effect_args:
-                entry.side_effect_args = sanitize_payload(entry.side_effect_args)
+                entry.side_effect_args = sanitize_payload(
+                    entry.side_effect_args, pseudonymizer=pseudonymizer
+                )
             if entry.side_effect_kwargs:
-                entry.side_effect_kwargs = sanitize_payload(entry.side_effect_kwargs)
+                entry.side_effect_kwargs = sanitize_payload(
+                    entry.side_effect_kwargs, pseudonymizer=pseudonymizer
+                )
             if entry.side_effect_result:
-                entry.side_effect_result = sanitize_payload(entry.side_effect_result)
+                entry.side_effect_result = sanitize_payload(
+                    entry.side_effect_result, pseudonymizer=pseudonymizer
+                )
             if entry.side_effect_exception:
-                entry.side_effect_exception = sanitize_string(entry.side_effect_exception)
+                entry.side_effect_exception = sanitize_string(
+                    entry.side_effect_exception, pseudonymizer=pseudonymizer
+                )
             scrubbed_count += 1
 
         entry.prev_hash = expected_prev

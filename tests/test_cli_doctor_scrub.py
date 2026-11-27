@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 
 import pytest
+import httpx
+from pydantic import BaseModel, EmailStr, UUID4, PaymentCardNumber, Field
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -14,6 +16,9 @@ from rerunner.cassette import Cassette
 from rerunner.cli import app
 from rerunner.integrity import verify_cassette_integrity
 from rerunner.models import CassetteEntry, RecordedRequest, RecordedResponse
+from rerunner.matcher import compute_request_key
+from rerunner.transport import CassetteTransport
+from rerunner.sanitizer import Pseudonymizer, sanitize_string
 
 runner = CliRunner(env={"COLUMNS": "200"})
 
@@ -379,3 +384,230 @@ def test_doctor_summary_preserves_existing_modes(tmp_path: Path) -> None:
     assert original.exit_code == 1
     assert "Auditing cassette:" in original.output
     assert "Cassette Audit Summary" not in original.output
+
+
+class _SyntheticIdentity(BaseModel):
+    email: EmailStr
+    identifier: UUID4
+    ssn: str = Field(pattern=r"^900-\d{2}-\d{4}$")
+    card: PaymentCardNumber
+
+
+@pytest.mark.parametrize("suffix", [".jsonl", ".gz", ".zst"])
+def test_scrub_pseudonymize_formats_replay_and_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    source = tmp_path / ("source" + suffix)
+    first = tmp_path / ("first" + suffix)
+    second = tmp_path / ("second" + suffix)
+    other = tmp_path / ("other" + suffix)
+    identity = {
+        "email": "fixture.person@example.net",
+        "identifier": "550e8400-e29b-41d4-a716-446655440000",
+        "ssn": "000-12-3456",
+        "card": "4111-1111-1111-1111",
+    }
+    fake_key = "sk-" + "A" * 40
+    custom = "fixture_private_marker"
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", json.dumps([custom]))
+    body = json.dumps(
+        {
+            **identity,
+            "secret": fake_key,
+            "marker": custom,
+            "message": "test " + fake_key,
+            "count": 42,
+        }
+    )
+    url = "https://example.net/api?token=fixture-token"
+    request_key = compute_request_key("POST", url, body)
+    cassette = Cassette(source)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            request=RecordedRequest(
+                method="POST",
+                url=url,
+                request_key=request_key,
+                body=body,
+                headers={
+                    "authorization": "Bearer " + identity["identifier"],
+                    "x-api-key": "opaque",
+                },
+            ),
+            response=RecordedResponse(status_code=200, body=body),
+        )
+    )
+    cassette.append(
+        CassetteEntry(
+            step=2,
+            entry_type="tool",
+            side_effect_name="lookup",
+            side_effect_args=[identity["email"]],
+            side_effect_kwargs={"nested": [identity, True, 42]},
+            side_effect_result=identity,
+            side_effect_exception=identity["email"] + " " + fake_key,
+        )
+    )
+    cassette.save()
+    original = source.read_bytes()
+
+    def scrub_to(path: Path, seed: str) -> None:
+        result = runner.invoke(
+            app, ["scrub", str(source), "--output", str(path), "--pseudonymize", "--seed", seed]
+        )
+        assert result.exit_code == 0, result.output
+        assert "review before sharing" in result.output
+        assert seed not in result.output
+
+    scrub_to(first, "fixture-seed-a")
+    scrub_to(second, "fixture-seed-a")
+    scrub_to(other, "fixture-seed-b")
+    assert source.read_bytes() == original
+    a, b, c = (Cassette.load(path) for path in (first, second, other))
+    assert [e.model_dump() for e in a.entries] == [e.model_dump() for e in b.entries]
+    assert a.entries[0].entry_hash != c.entries[0].entry_hash
+    assert a.entries[0].request is not None
+    assert a.entries[0].response is not None
+    request, response = a.entries[0].request, a.entries[0].response
+    clean = json.loads(response.body)
+    _SyntheticIdentity.model_validate(clean)
+    for field, original_value in identity.items():
+        assert clean[field] != original_value
+    assert clean["count"] == 42
+    assert clean["secret"] == "[REDACTED]"
+    assert clean["message"] == "test [REDACTED_OPENAI_KEY]"
+    assert clean["marker"] == "[REDACTED]"
+    assert request.headers["authorization"] == request.headers["x-api-key"] == "[REDACTED]"
+    assert "fixture-token" not in request.url
+    assert request.request_key == request_key
+    assert json.loads(request.body) == clean
+    assert a.entries[1].side_effect_args == [clean["email"]]
+    assert a.entries[1].side_effect_result == {k: clean[k] for k in identity}
+    assert a.entries[1].side_effect_kwargs == {
+        "nested": [{k: clean[k] for k in identity}, True, 42]
+    }
+    assert a.entries[1].side_effect_exception == clean["email"] + " [REDACTED_OPENAI_KEY]"
+    assert verify_cassette_integrity(a.entries)[0]
+    # The existing leak scanner stays conservative about PII-shaped synthetic data.
+    assert runner.invoke(app, ["verify", str(first), "--strict"]).exit_code == 1
+    a.entries[0].response.body = "tampered"
+    assert not verify_cassette_integrity(a.entries)[0]
+
+    def forbidden_network(request: httpx.Request) -> httpx.Response:
+        pytest.fail("replay must not use the live transport")
+
+    transport = CassetteTransport(
+        first, mode="replay", real_transport=httpx.MockTransport(forbidden_network)
+    )
+    with httpx.Client(transport=transport) as client:
+        replayed = client.post(url, content=body)
+        assert replayed.json() == clean
+
+
+def test_scrub_pseudonymize_dry_run_and_seed_validation(tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl"
+    target = tmp_path / "target.jsonl"
+    cassette = Cassette(source)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            request=RecordedRequest(method="GET", url="https://example.net"),
+            response=RecordedResponse(status_code=200, body="fixture@example.net"),
+        )
+    )
+    cassette.save()
+    before = source.read_bytes()
+    target.write_bytes(b"unchanged")
+    result = runner.invoke(
+        app,
+        [
+            "scrub",
+            str(source),
+            "--pseudonymize",
+            "--seed",
+            "fixture",
+            "--dry-run",
+            "--output",
+            str(target),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert source.read_bytes() == before and target.read_bytes() == b"unchanged"
+    result = runner.invoke(app, ["scrub", str(source), "--seed", "fixture"])
+    assert result.exit_code != 0 and source.read_bytes() == before
+
+
+def test_scrub_pseudonymize_stream_boundaries_and_seed_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "stream.jsonl"
+    target = tmp_path / "synthetic.jsonl"
+    monkeypatch.setenv("RERUNNER_PSEUDONYM_SEED", "fixture-env")
+    parts = ["data: fixture.person@exam", "ple.net sk-" + "A" * 20, "A" * 20 + " done\n\n"]
+    cassette = Cassette(source)
+    cassette.append(
+        CassetteEntry(
+            step=1,
+            request=RecordedRequest(method="GET", url="https://example.net"),
+            response=RecordedResponse(
+                status_code=200,
+                body="".join(parts),
+                chunks=parts,
+                chunk_delays_ms=[0.0, 1.0, 2.0],
+                is_streaming=True,
+            ),
+        )
+    )
+    cassette.save()
+    result = runner.invoke(app, ["scrub", str(source), "--pseudonymize", "--output", str(target)])
+    assert result.exit_code == 0, result.output
+    response = Cassette.load(target).entries[0].response
+    assert response is not None
+    expected = Pseudonymizer("fixture-env", email_domain="example.org").pseudonymize_email(
+        "fixture.person@example.net"
+    )
+    assert response.body == "".join(response.chunks)
+    assert response.body == f"data: {expected} [REDACTED_OPENAI_KEY] done\n\n"
+    assert len(response.chunks) == 3
+    assert response.chunk_delays_ms == [0.0, 1.0, 2.0]
+
+
+def test_pseudonymization_retains_other_redaction_and_legacy_domain() -> None:
+    p = Pseudonymizer("fixture", email_domain="example.org")
+    text = "123-456-7890 192.168.0.1 4111-1111-1111-1112"
+    assert (
+        sanitize_string(text, pseudonymizer=p)
+        == "[REDACTED_PHONE] [REDACTED_IP_ADDRESS] [REDACTED_CREDIT_CARD]"
+    )
+    assert (
+        Pseudonymizer("fixture").pseudonymize_email("fixture@example.net").endswith("@example.test")
+    )
+
+
+def test_pseudonymized_payload_keeps_credential_redaction_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rerunner.sanitizer import sanitize_payload
+
+    p = Pseudonymizer("fixture", email_domain="example.org")
+    identifier = "550e8400-e29b-41d4-a716-446655440000"
+    secret_email = "private.fixture@example.net"
+    monkeypatch.setenv("RERUNNER_REDACT_PATTERNS", json.dumps([re.escape(secret_email)]))
+    result = sanitize_payload(
+        {
+            "authorization": identifier,
+            "api_key": identifier,
+            "password": "opaque-fixture",
+            "contact": secret_email,
+            "identifier": identifier,
+        },
+        pseudonymizer=p,
+    )
+    assert result == {
+        "authorization": "[REDACTED]",
+        "api_key": "[REDACTED]",
+        "password": "[REDACTED]",
+        "contact": "[REDACTED]",
+        "identifier": p.pseudonymize_uuid(identifier),
+    }
