@@ -886,6 +886,10 @@ class Pseudonymizer:
         result = self._UUID_RE.sub(lambda m: self.pseudonymize_uuid(m.group(0)), result)
         result = self._SSN_RE.sub(lambda m: self.pseudonymize_ssn(m.group(0)), result)
         result = self._CC_RE.sub(lambda m: self.pseudonymize_credit_card(m.group(0)), result)
+        # A colon-delimited MAC also resembles a short IPv6 group sequence, so
+        # recognize MACs first before applying the broader IPv6 matcher.
+        result = self._MAC_RE.sub(lambda m: self.pseudonymize_mac(m.group(0)), result)
+        result = self._IPV6_RE.sub(lambda m: self.pseudonymize_ipv6(m.group(0)), result)
         return result
 
     def pseudonymize_payload(self, payload: Any) -> Any:
