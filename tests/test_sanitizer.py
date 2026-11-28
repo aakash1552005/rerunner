@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import subprocess
@@ -984,6 +985,72 @@ def test_regex_exact_boundary_lengths() -> None:
     assert sanitize_string("xoxb-" + "a" * 9) == "xoxb-" + "a" * 9
     assert sanitize_string("xoxb-" + "a" * 10) == "[REDACTED_SLACK_TOKEN]"
     assert sanitize_string("xoxb-" + "a" * 48) == "[REDACTED_SLACK_TOKEN]"
+
+
+def test_pseudonymizer_ipv6_and_mac_are_valid_deterministic_and_format_preserving() -> None:
+    first = Pseudonymizer(seed="network-seed")
+    same_seed = Pseudonymizer(seed="network-seed")
+    other_seed = Pseudonymizer(seed="different-network-seed")
+
+    ipv6 = "2001:db8::1234"
+    synthetic_ipv6 = first.pseudonymize_ipv6(ipv6)
+    assert ipaddress.IPv6Address(synthetic_ipv6)
+    assert synthetic_ipv6 != ipv6
+    assert synthetic_ipv6 == same_seed.pseudonymize_ipv6(ipv6)
+    assert synthetic_ipv6 != other_seed.pseudonymize_ipv6(ipv6)
+    assert first.pseudonymize_ipv6("2001:0db8:0000:0000:0000:0000:0000:1234") == synthetic_ipv6
+    assert first.pseudonymize_ipv6("not-an-ipv6-address") == "not-an-ipv6-address"
+    # Six two-character groups are still a valid expanded IPv6 address, not a MAC.
+    grouped_ipv6 = "ab:cd:ef:12:34:56:78:90"
+    grouped_pseudonym = first.pseudonymize_string(grouped_ipv6)
+    assert ipaddress.IPv6Address(grouped_pseudonym)
+    assert grouped_pseudonym != grouped_ipv6
+
+    mac = "00:11:22:33:44:55"
+    synthetic_colon = first.pseudonymize_mac(mac)
+    synthetic_hyphen = first.pseudonymize_mac("00-11-22-33-44-55")
+    synthetic_dotted = first.pseudonymize_mac("0011.2233.4455")
+    synthetic_plain = first.pseudonymize_mac("001122334455")
+
+    def octets(value: str) -> bytes:
+        return bytes.fromhex(re.sub(r"[^0-9a-fA-F]", "", value))
+
+    assert ":" in synthetic_colon
+    assert "-" in synthetic_hyphen
+    assert "." in synthetic_dotted
+    assert len(synthetic_plain) == 12
+    assert octets(synthetic_colon) == octets(synthetic_hyphen) == octets(synthetic_dotted) == octets(synthetic_plain)
+    assert synthetic_colon != mac
+    assert synthetic_colon == same_seed.pseudonymize_mac(mac)
+    assert synthetic_colon != other_seed.pseudonymize_mac(mac)
+    assert octets(synthetic_colon)[0] & 0x03 == 0x02  # locally administered, unicast
+    assert first.pseudonymize_mac("not-a-mac-address") == "not-a-mac-address"
+
+    text = f"host [{ipv6}] uses hardware address {mac}"
+    cleaned = first.pseudonymize_string(text)
+    synthetic_text_ipv6 = cleaned.split("[", 1)[1].split("]", 1)[0]
+    synthetic_text_mac = cleaned.rsplit(" ", 1)[1]
+    assert ipaddress.IPv6Address(synthetic_text_ipv6)
+    assert synthetic_text_ipv6 != ipv6
+    assert synthetic_text_mac == synthetic_colon
+    assert ipv6 not in cleaned and mac not in cleaned
+
+    payload = first.pseudonymize_payload({"host": ipv6, "mac": mac})
+    assert ipaddress.IPv6Address(payload["host"])
+    assert payload["host"] == synthetic_ipv6
+    assert payload["mac"] == synthetic_colon
+
+    # Exercise the same path used by sanitize_string/sanitize_payload when the
+    # CLI runs in pseudonymization mode, not just the helper methods directly.
+    sanitized_text = sanitize_string(text, pseudonymizer=first)
+    sanitized_ipv6 = sanitized_text.split("[", 1)[1].split("]", 1)[0]
+    sanitized_mac = sanitized_text.rsplit(" ", 1)[1]
+    assert ipaddress.IPv6Address(sanitized_ipv6)
+    assert sanitized_ipv6 == synthetic_ipv6
+    assert sanitized_mac == synthetic_colon
+
+    sanitized_payload = sanitize_payload({"host": ipv6, "mac": mac}, pseudonymizer=first)
+    assert sanitized_payload == {"host": synthetic_ipv6, "mac": synthetic_colon}
 
 
 def test_pseudonymizer_exact_values() -> None:

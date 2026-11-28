@@ -12,6 +12,7 @@ from collections.abc import Iterable
 import dataclasses
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -783,6 +784,15 @@ class Pseudonymizer:
     )
     _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
     _CC_RE = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
+    _IPV6_RE = re.compile(
+        r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])"
+    )
+    _MAC_RE = re.compile(
+        r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])|"
+        r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])|"
+        r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}(?![0-9A-Fa-f])|"
+        r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{12}(?![0-9A-Fa-f])"
+    )
 
     def __init__(
         self,
@@ -832,6 +842,42 @@ class Pseudonymizer:
         check = (10 - (total % 10)) % 10
         return f"{body}{check}"
 
+    def pseudonymize_ipv6(self, value: str) -> str:
+        """Return a deterministic, valid synthetic IPv6 address."""
+        try:
+            address = ipaddress.IPv6Address(value)
+        except ipaddress.AddressValueError:
+            return value
+        digest = self._digest("ipv6", address.packed.hex())
+        return str(ipaddress.IPv6Address(int(digest[:32], 16)))
+
+    def pseudonymize_mac(self, value: str) -> str:
+        """Return a deterministic locally administered unicast MAC in the same notation."""
+        if not self._MAC_RE.fullmatch(value):
+            return value
+        digits = re.sub(r"[^0-9a-fA-F]", "", value)
+        if len(digits) != 12:
+            return value
+        try:
+            original = bytes.fromhex(digits)
+        except ValueError:
+            return value
+
+        digest = bytes.fromhex(self._digest("mac", original.hex())[:12])
+        octets = bytearray(digest)
+        # Mark the synthetic address as locally administered and unicast. This avoids
+        # impersonating a vendor-assigned hardware address or producing a multicast MAC.
+        octets[0] = (octets[0] | 0x02) & 0xFE
+
+        if "." in value:
+            result = ".".join(octets.hex()[index : index + 4] for index in range(0, 12, 4))
+        elif ":" in value:
+            result = ":".join(f"{octet:02x}" for octet in octets)
+        elif "-" in value:
+            result = "-".join(f"{octet:02x}" for octet in octets)
+        else:
+            result = octets.hex()
+        return result.upper() if value.isupper() else result
     def pseudonymize_string(self, text: str) -> str:
         """Apply format-preserving pseudonymization across known PII patterns in text."""
         if not text:
@@ -840,6 +886,10 @@ class Pseudonymizer:
         result = self._UUID_RE.sub(lambda m: self.pseudonymize_uuid(m.group(0)), result)
         result = self._SSN_RE.sub(lambda m: self.pseudonymize_ssn(m.group(0)), result)
         result = self._CC_RE.sub(lambda m: self.pseudonymize_credit_card(m.group(0)), result)
+        # A colon-delimited MAC also resembles a short IPv6 group sequence, so
+        # recognize MACs first before applying the broader IPv6 matcher.
+        result = self._MAC_RE.sub(lambda m: self.pseudonymize_mac(m.group(0)), result)
+        result = self._IPV6_RE.sub(lambda m: self.pseudonymize_ipv6(m.group(0)), result)
         return result
 
     def pseudonymize_payload(self, payload: Any) -> Any:
@@ -866,6 +916,8 @@ _PSEUDONYM_RE = re.compile(
             ("card", _CARD_REGEX),
             ("ssn", Pseudonymizer._SSN_RE),
             ("phone", _PHONE_RE),
+            ("mac", Pseudonymizer._MAC_RE),
+            ("ipv6", Pseudonymizer._IPV6_RE),
             ("ip", _IP_REGEX),
         )
     )
@@ -899,6 +951,10 @@ def _sanitize_with_pseudonyms(
             return "[REDACTED_CREDIT_CARD]" if " " in value or "-" in value else value
         if kind == "phone":
             return "[REDACTED_PHONE]"
+        if kind == "ipv6":
+            return pseudonymizer.pseudonymize_ipv6(value)
+        if kind == "mac":
+            return pseudonymizer.pseudonymize_mac(value)
         if kind == "ip" and _is_probable_ip(value):
             return "[REDACTED_IP_ADDRESS]"
         return value
