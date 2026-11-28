@@ -33,6 +33,10 @@ SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"ghp_[a-zA-Z0-9]{36,}", re.IGNORECASE), "[REDACTED_GITHUB_TOKEN]"),
     (re.compile(r"gho_[a-zA-Z0-9]{36,}", re.IGNORECASE), "[REDACTED_GITHUB_OAUTH_TOKEN]"),
     (re.compile(r"AKIA[0-9A-Z]{16}", re.IGNORECASE), "[REDACTED_AWS_KEY_ID]"),
+    # AWS STS temporary access key IDs
+    (re.compile(r"ASIA[0-9A-Z]{16}"), "[REDACTED_AWS_SESSION_KEY_ID]"),
+    # Hugging Face Hub access tokens
+    (re.compile(r"hf_[A-Za-z0-9]{32,}"), "[REDACTED_HUGGINGFACE_TOKEN]"),
     (re.compile(r"xox[baprs]-[0-9a-zA-Z]{10,48}", re.IGNORECASE), "[REDACTED_SLACK_TOKEN]"),
     # PII Scrubbers
     (
